@@ -1,0 +1,24 @@
+# Virtual environments
+venv/
+.venvPI/
+.venv/
+.env/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# VS Code and other IDE junk
+.vscode/
+.idea/
+
+# Logs, temp, outputs
+*.log
+*.tmp
+
+# # Training artifacts (optional – keeps repo lightweight)
+# training_data/models/
+# *.h5
+# *.pkl
