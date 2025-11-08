@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import os
 import sys
 import pickle
@@ -5,33 +6,54 @@ from threading import Event, Thread
 from queue import Queue
 import cv2
 import json
+from pathlib import Path
+import numpy as np
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# --- Make 'training_data' importable by adding repo root (two levels up) ---
+# .../Project_Yad/training_data/windows_training_code/example.py (this file)
+# We need to add .../Project_Yad to sys.path so 'training_data' is importable.
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
 from training_data.record import record_gestures
 from training_data.fine_tune import fine_tune_model
 from training_data.inference import real_time_inference, show_image_for_prediction
-from training_data.utils import FilterTypes, BiquadMultiChan, BiquadMultiChan, FilterTypes, send_output_to_socket
+from training_data.utils import FilterTypes, BiquadMultiChan, send_output_to_socket
 
-#config loading
+# (Optional) quieter TF logs
+try:
+    import tensorflow as tf
+    tf.get_logger().setLevel('ERROR')
+except Exception:
+    pass
+
+
+# ---------------- Config loading (also looks in assets/) ----------------
 def load_config():
-    possible_paths = [
-        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "config.json")),
-        os.path.abspath("config.json")
+    here = Path(__file__).resolve()
+    pkg_dir = here.parents[1]           # .../training_data
+    repo_root = pkg_dir.parent          # .../Project_Yad
+
+    candidates = [
+        pkg_dir / "config.json",                # Project_Yad/training_data/config.json
+        repo_root / "config.json",              # Project_Yad/config.json
+        repo_root / "assets" / "config.json",   # Project_Yad/assets/config.json  <-- your case
+        Path.cwd() / "config.json",             # current working directory
     ]
-    config_path = next((p for p in possible_paths if os.path.exists(p)), None)
 
+    config_path = next((p for p in candidates if p.is_file()), None)
     if config_path is None:
-        raise FileNotFoundError("Configuration file not found in the expected locations.")
+        tried = "\n  - ".join(str(p) for p in candidates)
+        raise FileNotFoundError("Configuration file not found. Looked for:\n  - " + tried)
 
-    with open(config_path, "r") as f:
+    with open(config_path, "r", encoding="utf-8") as f:
         config = json.load(f)
 
-    config_dir = os.path.dirname(config_path)
+    config_dir = config_path.parent
     for key in ["data_path", "feature_extractor_path", "mlp_model_path", "scaler_path", "gesture_image_path"]:
-        if key in config:
+        if key in config and isinstance(config[key], str):
             config[key] = os.path.abspath(os.path.join(config_dir, config[key]))
 
+    print(f"[cfg] Using: {config_path}")
     return config
 
 
@@ -72,8 +94,8 @@ def main():
             data_path=data_path,
             gesture_image_path=gesture_image_path,
             skip_gestures=skip_gestures,
-            gestures_repeat=1,
-            recording_time_sec=8,
+            gestures_repeat=3,
+            recording_time_sec=6,
             sampling_rate=sampling_rate,
             model_input_len=model_input_len,
             overlap_frac=model_input_len // 10,
@@ -136,3 +158,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
