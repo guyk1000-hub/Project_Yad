@@ -58,11 +58,9 @@ This project was inspired by and partially adapted from:
 MindRove / NaviFlame
  – EMG data streaming and control interface
 
-tomerohayon77 / mindrove-emg-classifier
- – feature extraction and classification pipeline
+liadolier99 / Mindrove_armband_EMG_classifier
+ – classification pipeline with raspberry pi
 
 We thank the authors of these open-source projects for their contributions, which helped guide parts of this work.
 
-📜 License
 
-This project is licensed under the MIT License (or another license you choose).
