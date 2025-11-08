@@ -16,21 +16,42 @@ tf.get_logger().setLevel('ERROR')  # Suppresses logs except errors
 
 #config loading
 def load_config():
+    """
+    Load the configuration file (config.json) from common locations.
+
+    Looks for:
+    1. <project_root>/assets/config.json
+    2. <this_script_directory>/config.json
+    3. Current working directory/config.json
+    """
+
+    # Determine project root relative to this file
+    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     possible_paths = [
-        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "config.json")),
-        os.path.abspath("config.json")
+        os.path.join(base_dir, "assets", "config.json"),     # main project location
+        os.path.join(os.path.dirname(__file__), "config.json"),  # same dir as script
+        os.path.abspath("config.json")                           # working dir
     ]
+
     config_path = next((p for p in possible_paths if os.path.exists(p)), None)
-
     if config_path is None:
-        raise FileNotFoundError("Configuration file not found in the expected locations.")
+        raise FileNotFoundError(
+            f"config.json not found in: {possible_paths}"
+        )
 
-    with open(config_path, "r") as f:
+    with open(config_path, "r", encoding="utf-8") as f:
         config = json.load(f)
 
+    # Resolve all relevant paths relative to config's directory
     config_dir = os.path.dirname(config_path)
-    for key in ["data_path", "feature_extractor_path", "mlp_model_path", "scaler_path", "gesture_image_path"]:
-        if key in config:
+    for key in [
+        "data_path",
+        "feature_extractor_path",
+        "mlp_model_path",
+        "scaler_path",
+        "gesture_image_path"
+    ]:
+        if key in config and isinstance(config[key], str):
             config[key] = os.path.abspath(os.path.join(config_dir, config[key]))
 
     return config

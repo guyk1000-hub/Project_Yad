@@ -1,6 +1,7 @@
 # Virtual environments
 venv/
 .venvPI/
+venvPI/
 .venv/
 .env/
 
