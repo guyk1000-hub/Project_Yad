@@ -1,6 +1,6 @@
 # Project Yad – EMG-Based Gesture Recognition
 
-Project Yad is a collaborative EMG-based gesture recognition system built by **Guy Katabi** and collaborators.  
+Project Yad is a collaborative EMG-based gesture recognition system built by **Guy Katabi** and **Tomer Ohayon**.  
 It uses EMG signals from an armband (e.g., MindRove) and processes them in real-time on a Raspberry Pi to classify hand gestures.
 
 ## 🔧 Features
