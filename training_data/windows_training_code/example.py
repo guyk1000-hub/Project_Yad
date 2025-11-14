@@ -65,26 +65,33 @@ def main():
     mlp_model_path = config["mlp_model_path"]
     scaler_path = config["scaler_path"]
     gesture_image_path = config["gesture_image_path"]
-    
 
     # Flags 
     record = config["record"]
     fine_tune = config["fine_tune"]
     show_predicted_image = config["show_predicted_image"]
     send_to_socket = config["send_to_socket"]
-    
+
     # Skip gestures
     skip_gestures = []
-    # Sampling rate and model input length
-    sampling_rate = 500
-    model_input_len = 100
 
-    # Define filters
+    # Sampling / window parameters from config
+    sampling_rate = int(config.get("sampling_rate", 500))          # raw Fs (MindRove)
+    model_input_len = int(config.get("model_input_len", 100))      # window length AFTER downsampling
+    downsample_factor = int(config.get("downsample_factor", 1))    # 1=no decimation, 2=500->250 Hz
+
+    # Define filters at RAW sampling_rate
+    # High-pass ~4.5 Hz, notch at 50 Hz, low-pass 100 Hz (anti-alias for 250 Hz when downsample_factor=2)
     filters = [
-        BiquadMultiChan(8, FilterTypes.bq_type_highpass, 4.5 / sampling_rate, 0.5, 0.0), # Dc filter
-        BiquadMultiChan(8, FilterTypes.bq_type_notch, 50.0 / sampling_rate, 4.0, 0.0), # 50 Hz noise
-        BiquadMultiChan(8, FilterTypes.bq_type_lowpass, 100.0 / sampling_rate, 0.5, 0.0), 
+        BiquadMultiChan(8, FilterTypes.bq_type_highpass, 4.5 / sampling_rate, 0.5, 0.0),   # DC / drift
+        BiquadMultiChan(8, FilterTypes.bq_type_notch,    50.0 / sampling_rate, 4.0, 0.0),  # 50 Hz mains
+        BiquadMultiChan(8, FilterTypes.bq_type_lowpass,  100.0 / sampling_rate, 0.5, 0.0), # anti-alias
     ]
+
+    print("Parameters:")
+    print(f"  sampling_rate (raw)   : {sampling_rate} Hz")
+    print(f"  downsample_factor     : {downsample_factor}")
+    print(f"  model_input_len (eff) : {model_input_len} samples")
 
     # Step 1: Record Gestures
     print("Step 1: Recording Gestures")
@@ -97,15 +104,15 @@ def main():
             gestures_repeat=3,
             recording_time_sec=6,
             sampling_rate=sampling_rate,
-            model_input_len=model_input_len,
-            overlap_frac=model_input_len // 10,
+            model_input_len=model_input_len,      # effective length (after decimation)
+            overlap_frac=max(1, model_input_len // 10),
+            downsample_factor=downsample_factor,  # NEW: record at 500 Hz, store at 250 Hz if =2
         )
     else:
         print("Skipping gesture recording.")
 
     # Step 2: Fine-Tune the Model
     print("Step 2: Fine-Tuning the Model")
-    
     if fine_tune:
         with open(data_path, "rb") as f:
             recorded_data, recorded_labels = pickle.load(f)
@@ -128,6 +135,7 @@ def main():
         output_queue = Queue()
         socket_thread = Thread(target=send_output_to_socket, args=(stop_event, output_queue))
         socket_thread.start()
+
     try:
         for prediction, probabilities in real_time_inference(
             feature_extractor_path=feature_extractor_path,
@@ -138,24 +146,23 @@ def main():
             gyro_threshold=500,
             prediction_threshold=0.4,
             batch_size=5,
+            downsample_factor=downsample_factor,  # NEW: must match recording/training
         ):
-            #print(f"Prediction: {prediction}, Probabilities: {probabilities.round(4)}")
             print(f"Predicted gesture: {prediction}")
             if send_to_socket:
                 output_queue.put(prediction)
             if show_predicted_image:
                 show_image_for_prediction(prediction, gesture_image_path, skip_gestures)
-            
+
     except KeyboardInterrupt:
         print("Real-time inference stopped.")
         if send_to_socket:
             stop_event.set()
             socket_thread.join()
-        # close all windows
         cv2.destroyAllWindows()
 
     print("Example script completed.")
 
+
 if __name__ == "__main__":
     main()
-

@@ -9,6 +9,7 @@ from mindrove.board_shim import BoardShim, MindRoveInputParams, BoardIds
 # Initialize logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+
 def show_image(i, gesture_image_path):
     """Display the image for the gesture (non-blocking)."""
     image_file = os.path.join(gesture_image_path, f"g{i}.png")
@@ -28,30 +29,59 @@ def show_image(i, gesture_image_path):
     else:
         logging.error(f"Image file not found: {image_file}")
 
-def preprocess_data(data, filters):
-    """Apply filter stack: data[L, 8] -> same shape."""
+
+def preprocess_data(data, filters, downsample_factor: int = 1):
+    """
+    Apply filter stack and optional downsampling.
+
+    Input:
+        data            : [L_raw, 8]  (raw samples at sampling_rate, e.g. 500 Hz)
+        filters         : list of BiquadMultiChan
+        downsample_factor : 1 = no decimation, 2 = keep every 2nd sample, etc.
+
+    Output:
+        processed_data  : [L_eff, 8] after filtering (+ optional decimation)
+                          where L_eff ~= L_raw / downsample_factor
+    """
+    # 1) filtering at raw sampling rate
     for i in range(len(data)):
         for ch in range(data.shape[1]):
             for filter_ in filters:
                 data[i, ch] = filter_.process(data[i, ch], ch)
+
+    # 2) optional decimation in time
+    if downsample_factor is not None and downsample_factor > 1:
+        data = data[::downsample_factor, :]
+
     return data
+
 
 def record_gestures(
     filters,
     data_path,
     gesture_image_path="gestures_tomer",
-    skip_gestures=[],
+    skip_gestures=None,
     gestures_repeat=3,
     recording_time_sec=6,
     sampling_rate=500,
     model_input_len=100,
-    overlap_frac=10,          # must be an integer (number of samples to step)
-    num_gestures=5,
+    overlap_frac=10,          # step size in *effective* samples
+    num_gestures=6,
+    downsample_factor: int = 1,
 ):
     """
     Record gestures from the MindRove board and save them to a file.
-    Signature intentionally identical to your working version.
+
+    - The board always streams at 'sampling_rate' (e.g. 500 Hz).
+    - Filters are applied at this raw rate.
+    - If downsample_factor > 1, the data is decimated after filtering:
+        L_eff = L_raw / downsample_factor
+    - model_input_len is the window length *after* downsampling
+      (e.g. 50 samples at 250 Hz when downsample_factor=2).
     """
+    if skip_gestures is None:
+        skip_gestures = []
+
     recorded_data = []
     recorded_labels = []
     fft_warmup = 10
@@ -79,7 +109,7 @@ def record_gestures(
             if board_shim.get_board_data_count() > 0:
                 raw_data = board_shim.get_board_data(sampling_rate)
                 emg_data = raw_data[:8]
-                _ = preprocess_data(emg_data.T, filters)
+                _ = preprocess_data(emg_data.T, filters, downsample_factor)
 
         # Start recording gestures
         for repeat in range(gestures_repeat):
@@ -88,35 +118,40 @@ def record_gestures(
                     continue
 
                 show_image(gesture_id, gesture_image_path)
-                input(f"{repeat}/{gestures_repeat} - Perform gesture id {gesture_id}. "
-                      f"Press Enter to start recording for {recording_time_sec} seconds.")
+                input(
+                    f"{repeat}/{gestures_repeat} - Perform gesture id {gesture_id}. "
+                    f"Press Enter to start recording for {recording_time_sec} seconds."
+                )
                 gesture_data = []
                 board_shim.get_board_data()  # clear buffer
 
-                # Wait until the desired number of samples are received
+                # Wait until the desired number of raw samples are received
                 need = recording_time_sec * sampling_rate
                 while board_shim.get_board_data_count() < need:
                     pass
 
-                # Collect the data
+                # Collect the raw data at sampling_rate (e.g. 500 Hz)
                 raw_data = board_shim.get_board_data(need)
                 if raw_data.shape[0] < 8:
                     logging.error("Board returned fewer than 8 channels; skipping this segment.")
                     continue
-                emg_data = raw_data[:8]  # Only EMG data [8, T]
-                processed_data = preprocess_data(emg_data.T, filters)  # [T, 8]
+                emg_data = raw_data[:8]  # Only EMG data [8, T_raw]
+
+                # Filter at raw Fs and downsample if requested
+                processed_data = preprocess_data(emg_data.T, filters, downsample_factor)  # [T_eff, 8]
 
                 # Safety: only slice if we have at least one full window
-                T = len(processed_data)
-                if T < model_input_len:
+                T_eff = len(processed_data)
+                if T_eff < model_input_len:
                     logging.warning(
-                        f"Not enough samples for a full window (have {T}, need {model_input_len}). Skipping."
+                        f"Not enough samples for a full window (have {T_eff}, need {model_input_len}). Skipping."
                     )
                     continue
 
-                for i in range(0, T - model_input_len, overlap_frac):
-                    sample = processed_data[i:i + model_input_len]      # [L,8]
-                    sample = np.expand_dims(sample.T, axis=2).astype(np.float32)  # [8,L,1]
+                for i in range(0, T_eff - model_input_len, overlap_frac):
+                    sample = processed_data[i:i + model_input_len]      # [L_eff, 8]
+                    # Keep orientation as before: [8, L, 1]
+                    sample = np.expand_dims(sample.T, axis=2).astype(np.float32)
                     gesture_data.append(sample)
 
                 recorded_data.extend(gesture_data)
@@ -126,8 +161,10 @@ def record_gestures(
         # Save the recorded data to a file
         with open(data_path, "wb+") as f:
             pickle.dump((recorded_data, recorded_labels), f)
-        logging.info(f"Gestures successfully recorded and saved to {data_path} "
-                     f"({len(recorded_data)} windows, labels {len(recorded_labels)}).")
+        logging.info(
+            f"Gestures successfully recorded and saved to {data_path} "
+            f"({len(recorded_data)} windows, labels {len(recorded_labels)})."
+        )
 
     except Exception as e:
         logging.error(f"Error recording gestures: {e}")
