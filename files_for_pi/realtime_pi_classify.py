@@ -2,14 +2,15 @@ import os
 import sys
 import json
 import cv2
+import time  # <-- NEW
 from threading import Event, Thread
 from queue import Queue
+import numpy as np
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from training_data.inference import real_time_inference, show_image_for_prediction
+from training_data.inference_mix import real_time_inference, show_image_for_prediction
 from training_data.utils import FilterTypes, BiquadMultiChan, send_output_to_socket
-
 import tensorflow as tf
 tf.get_logger().setLevel('ERROR')  # Suppresses logs except errors
 
@@ -18,7 +19,6 @@ tf.get_logger().setLevel('ERROR')  # Suppresses logs except errors
 def load_config():
     """
     Load the configuration file (config.json) from common locations.
-
     Looks for:
     1. <project_root>/assets/config.json
     2. <this_script_directory>/config.json
@@ -57,23 +57,32 @@ def load_config():
     return config
 
 
-def main():
+def main(shared_data=None):  # <-- CHANGED: accept shared_data
+    # If we are running under main_PI with shared_data, wait for WiFi
+    if shared_data is not None:
+        print("[realtime] Waiting for WiFi / armband connection...")
+        while True:
+            try:
+                if shared_data.get('connected', 0) == 1:
+                    print("[realtime] WiFi connected, starting inference.")
+                    break
+            except Exception:
+                pass
+            time.sleep(0.5)
+
     config = load_config()
 
-    # Extract paths
     feature_extractor_path = config["feature_extractor_path"]
     mlp_model_path = config["mlp_model_path"]
     scaler_path = config["scaler_path"]
     gesture_image_path = config["gesture_image_path"]
 
-    # Extract settings
     show_predicted_image = config["show_predicted_image"]
     send_to_socket = config["send_to_socket"]
-    
-    sampling_rate = 500
-    model_input_len = 100
 
-    # Define filters
+    sampling_rate = int(config.get("sampling_rate", 500))
+    model_input_len = int(config.get("model_input_len", 100))
+
     filters = [
         BiquadMultiChan(8, FilterTypes.bq_type_highpass, 4.5 / sampling_rate, 0.5, 0.0),
         BiquadMultiChan(8, FilterTypes.bq_type_notch, 50.0 / sampling_rate, 4.0, 0.0),
@@ -81,12 +90,12 @@ def main():
     ]
 
     print("Starting Real-Time Inference...")
-    
+
     if send_to_socket:
         stop_event = Event()
         output_queue = Queue()
-        socket_thread = Thread(target=send_output_to_socket, args=(stop_event, output_queue))
-        socket_thread.start()
+        # socket_thread = Thread(target=send_output_to_socket, args=(stop_event, output_queue))
+        # socket_thread.start()
 
     try:
         for prediction, probabilities in real_time_inference(
@@ -95,11 +104,11 @@ def main():
             scaler_path=scaler_path,
             filters=filters,
             model_input_len=model_input_len,
-            gyro_threshold=500,
-            prediction_threshold=0.4,
-            batch_size=5,
+            gyro_threshold=int(config.get("gyro_threshold", 90)),   # <-- TUNE: 60–120
+            prediction_threshold=float(config.get("prediction_threshold", 0.6)),
+            batch_size=int(config.get("batch_size", 8)),
         ):
-            print(f"Predicted gesture: {prediction}")
+            print(f"Pred: {prediction}  Probs: {np.round(probabilities, 3) if 'np' in globals() else '…'}")
 
             if send_to_socket:
                 output_queue.put(prediction)
@@ -111,10 +120,8 @@ def main():
         print("Inference stopped.")
         if send_to_socket:
             stop_event.set()
-            socket_thread.join()
-
+            # socket_thread.join()
         cv2.destroyAllWindows()
 
-
 if __name__ == "__main__":
-    main()
+    main()  # <-- still works standalone, without shared_data

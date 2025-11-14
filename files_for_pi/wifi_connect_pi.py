@@ -67,7 +67,7 @@ def wifi_connect_PI(shared_data):
 
                 
         else:
-            print(f"Already connected to {SSID}")
+            # print(f"Already connected to {SSID}")
             shared_data['connected'] = 1
         time.sleep(10)  # Check every 10 seconds
 
