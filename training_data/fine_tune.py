@@ -91,7 +91,7 @@ def fine_tune_model(
 
     mlp = MLPClassifier(
         hidden_layer_sizes=(32, 16),
-        max_iter=10000,
+        max_iter=20000,
         random_state=42,
         activation='tanh',
         solver='lbfgs',
