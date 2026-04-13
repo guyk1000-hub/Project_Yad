@@ -66,7 +66,7 @@ def record_gestures(
     sampling_rate=500,
     model_input_len=100,
     overlap_frac=10,          # step size in *effective* samples
-    num_gestures=6,
+    num_gestures=5,
     downsample_factor: int = 1,
 ):
     """

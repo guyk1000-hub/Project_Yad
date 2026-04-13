@@ -28,7 +28,7 @@ import numpy as np
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__),
                                                 "..", "..")))
 
-from training_data.inference import real_time_inference, show_image_for_prediction
+from training_data.inference_mix import real_time_inference, show_image_for_prediction
 from training_data.utils import FilterTypes, BiquadMultiChan, send_output_to_socket
 
 

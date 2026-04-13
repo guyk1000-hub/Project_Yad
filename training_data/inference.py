@@ -63,7 +63,7 @@ def _side_asymmetry_feature(batch_windows: np.ndarray) -> np.ndarray:
     returns [B,1] = mean(RMS(right)) - mean(RMS(left))
     """
     W = batch_windows[..., 0]          # [B, L, 8]
-    rms = np.sqrt(np.mean(W ** 2, axis=1))  # [B, 8]
+    rms = np.sqrt(np.mean(W ** 2, axis=2))  # [B, 8]
     e_left = np.mean(rms[:, list(EMG_LEFT_IDXS)], axis=1, keepdims=True)
     e_right = np.mean(rms[:, list(EMG_RIGHT_IDXS)], axis=1, keepdims=True)
     return (e_right - e_left).astype(np.float32)
@@ -75,7 +75,7 @@ def _magnitude_feature(batch_windows: np.ndarray) -> np.ndarray:
     returns [B,1] = mean RMS over all channels
     """
     W = batch_windows[..., 0]          # [B, L, 8]
-    rms = np.sqrt(np.mean(W ** 2, axis=1))  # [B, 8]
+    rms = np.sqrt(np.mean(W ** 2, axis=2))  # [B, 8]
     mag = np.mean(rms, axis=1, keepdims=True)  # [B, 1]
     return mag.astype(np.float32)
 

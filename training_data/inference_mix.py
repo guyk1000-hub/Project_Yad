@@ -54,23 +54,23 @@ def show_image_for_prediction(prediction: int, gesture_image_path: str, skip_ges
 
 def _compute_scalar_features(batch_windows: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """
-    batch_windows: [B, L, 8, 1]
+    batch_windows: [B, 8, L, 1]
     returns:
       asym: [B,1] = mean(RMS(right)) - mean(RMS(left))
       mag:  [B,1] = mean RMS over all channels
     """
-    # [B, L, 8]
+    # [B, 8, L]
     W = batch_windows[..., 0].astype(np.float32)
 
-    # RMS per channel: [B, 8]
-    rms = np.sqrt(np.mean(W * W, axis=1, dtype=np.float32))
+    # RMS per channel over time: [B, 8]
+    rms = np.sqrt(np.mean(W * W, axis=2, dtype=np.float32))
 
     # Side energies
     e_left = rms[:, EMG_LEFT_IDXS].mean(axis=1, keepdims=True)
     e_right = rms[:, EMG_RIGHT_IDXS].mean(axis=1, keepdims=True)
 
-    asym = e_right - e_left                 # [B, 1]
-    mag = rms.mean(axis=1, keepdims=True)   # [B, 1]
+    asym = e_right - e_left               # [B, 1]
+    mag = rms.mean(axis=1, keepdims=True) # [B, 1]
 
     return asym, mag
 
