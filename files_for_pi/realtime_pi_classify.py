@@ -1,3 +1,6 @@
+
+
+
 import os
 import sys
 import json
@@ -72,10 +75,10 @@ def main(shared_data=None):  # <-- CHANGED: accept shared_data
 
     config = load_config()
 
-    feature_extractor_path = config["feature_extractor_path"]
-    mlp_model_path = config["mlp_model_path"]
-    scaler_path = config["scaler_path"]
-    gesture_image_path = config["gesture_image_path"]
+    feature_extractor_path = config["feature_extractor_path_pi"]
+    mlp_model_path = config["mlp_model_path_pi"]
+    scaler_path = config["scaler_path_pi"]
+    gesture_image_path = config["gesture_image_path_pi"]
 
     show_predicted_image = config["show_predicted_image"]
     send_to_socket = config["send_to_socket"]
@@ -106,7 +109,7 @@ def main(shared_data=None):  # <-- CHANGED: accept shared_data
             model_input_len=model_input_len,
             gyro_threshold=int(config.get("gyro_threshold", 90)),   # <-- TUNE: 60–120
             prediction_threshold=float(config.get("prediction_threshold", 0.6)),
-            batch_size=int(config.get("batch_size", 8)),
+            batch_size=int(config.get("batch_size", 5)),
         ):
             print(f"Pred: {prediction}  Probs: {np.round(probabilities, 3) if 'np' in globals() else '…'}")
 
@@ -125,3 +128,7 @@ def main(shared_data=None):  # <-- CHANGED: accept shared_data
 
 if __name__ == "__main__":
     main()  # <-- still works standalone, without shared_data
+
+
+
+
