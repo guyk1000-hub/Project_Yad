@@ -63,7 +63,7 @@ def _compute_scalar_features(batch_windows: np.ndarray) -> tuple[np.ndarray, np.
     W = batch_windows[..., 0].astype(np.float32)
 
     # RMS per channel over time: [B, 8]
-    rms = np.sqrt(np.mean(W * W, axis=2, dtype=np.float32))
+    rms = np.sqrt(np.mean(W * W, axis=1, dtype=np.float32))
 
     # Side energies
     e_left = rms[:, EMG_LEFT_IDXS].mean(axis=1, keepdims=True)
@@ -102,6 +102,9 @@ def real_time_inference(
         feature_extractor_path,
         custom_objects={"MyMagnWarping": MyMagnWarping, "MyScaling": MyScaling},
     )
+   #  print("\n=================")
+   #  fx.summary()
+   # print("\n=================")
     feature_extractor = Model(
         inputs=fx.input,
         outputs=fx.get_layer("dense_8").output

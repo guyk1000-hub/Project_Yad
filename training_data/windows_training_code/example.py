@@ -73,6 +73,7 @@ def main():
     send_to_socket = config["send_to_socket"]
 
     # Skip gestures
+
     skip_gestures = []
 
     # Sampling / window parameters from config
@@ -101,7 +102,7 @@ def main():
             data_path=data_path,
             gesture_image_path=gesture_image_path,
             skip_gestures=skip_gestures,
-            gestures_repeat=3,
+            gestures_repeat=3 ,
             recording_time_sec=6,
             sampling_rate=sampling_rate,
             model_input_len=model_input_len,      # effective length (after decimation)

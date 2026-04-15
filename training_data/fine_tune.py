@@ -26,7 +26,7 @@ def _side_asymmetry_feature(batch_windows: np.ndarray) -> np.ndarray:
     batch_windows: [N, 8, L, 1]
     """
     W = batch_windows[..., 0]                       # [N, 8, L]
-    rms = np.sqrt(np.mean(W**2, axis=2))           # [N, 8]
+    rms = np.sqrt(np.mean(W**2, axis=1))           # [N, 8]
     e_left  = np.mean(rms[:, list(EMG_LEFT_IDXS)],  axis=1, keepdims=True)
     e_right = np.mean(rms[:, list(EMG_RIGHT_IDXS)], axis=1, keepdims=True)
     return (e_right - e_left).astype(np.float32)   # + sign tends toward "right" activation
@@ -38,7 +38,7 @@ def _magnitude_feature(batch_windows: np.ndarray) -> np.ndarray:
     batch_windows: [N, 8, L, 1]
     """
     W = batch_windows[..., 0]                       # [N, 8, L]
-    rms = np.sqrt(np.mean(W**2, axis=2))           # [N, 8]
+    rms = np.sqrt(np.mean(W**2, axis=1))           # [N, 8]
     mag = np.mean(rms, axis=1, keepdims=True)      # [N, 1]
     return mag.astype(np.float32)
 
@@ -126,3 +126,4 @@ def fine_tune_model(
             logging.info("Continuing despite low validation accuracy.")
 
     return scaler, mlp_accuracy
+
