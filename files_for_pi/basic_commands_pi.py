@@ -46,6 +46,8 @@ def commands_PI(shared_data):
                 await asyncio.sleep(3)
                 print("You may start")
                 shared_data['start'] = 1
+                #await client.write_gatt_char(prt.DIRECT_UUID, bytes(commands1["open"]))
+
                 while True:
                     if shared_data['action'] == 1:
                         shared_data['action'] = 0
@@ -55,18 +57,22 @@ def commands_PI(shared_data):
                             await client.write_gatt_char(prt.DIRECT_UUID, bytes(commands1["open"]))
                             log("COMMAND SENT: OPEN")
                             notify("OPEN")
-
                     # CLOSE
+                        elif shared_data['move'] == 'close' or shared_data['move'] == 'down':
                             await client.write_gatt_char(prt.DIRECT_UUID, bytes(commands1["close"]))
                             log("COMMAND SENT: CLOSE")
                             notify("CLOSE")
 
                     # LEFT
+                        elif shared_data['move'] == 'left':
+
                             await client.write_gatt_char(prt.DIRECT_UUID, bytes(commands1["left"]))
                             log("COMMAND SENT: LEFT")
                             notify("LEFT")
 
                     # RIGHT
+                        elif shared_data['move'] == 'right':
+
                             await client.write_gatt_char(prt.DIRECT_UUID, bytes(commands1["right"]))
                             log("COMMAND SENT: RIGHT")
                             notify("RIGHT")
@@ -86,7 +92,8 @@ def commands_PI(shared_data):
                           #  print("Sending trigger number 11")
 
                         else:
-                            print("Invalid command", shared_data['move'])
+                            #print("Invalid command", shared_data['move'])
+                            await asyncio.sleep(0.01)
 
         except Exception as e:
             print(f"Error: {e}")

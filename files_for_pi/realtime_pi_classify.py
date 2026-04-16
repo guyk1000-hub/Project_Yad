@@ -1,11 +1,8 @@
-
-
-
 import os
 import sys
 import json
 import cv2
-import time  # <-- NEW
+import time
 from threading import Event, Thread
 from queue import Queue
 import numpy as np
@@ -15,10 +12,19 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from training_data.inference_mix import real_time_inference, show_image_for_prediction
 from training_data.utils import FilterTypes, BiquadMultiChan, send_output_to_socket
 import tensorflow as tf
-tf.get_logger().setLevel('ERROR')  # Suppresses logs except errors
+tf.get_logger().setLevel('ERROR')
 
 
-#config loading
+GESTURE_MAP = {
+    0: 'rest',
+    1: 'close',
+    2: 'open',
+    3: 'right',
+    4: 'left'
+}
+
+
+# config loading
 def load_config():
     """
     Load the configuration file (config.json) from common locations.
@@ -28,31 +34,27 @@ def load_config():
     3. Current working directory/config.json
     """
 
-    # Determine project root relative to this file
     base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     possible_paths = [
-        os.path.join(base_dir, "assets", "config.json"),     # main project location
-        os.path.join(os.path.dirname(__file__), "config.json"),  # same dir as script
-        os.path.abspath("config.json")                           # working dir
+        os.path.join(base_dir, "assets", "config.json"),
+        os.path.join(os.path.dirname(__file__), "config.json"),
+        os.path.abspath("config.json")
     ]
 
     config_path = next((p for p in possible_paths if os.path.exists(p)), None)
     if config_path is None:
-        raise FileNotFoundError(
-            f"config.json not found in: {possible_paths}"
-        )
+        raise FileNotFoundError(f"config.json not found in: {possible_paths}")
 
     with open(config_path, "r", encoding="utf-8") as f:
         config = json.load(f)
 
-    # Resolve all relevant paths relative to config's directory
     config_dir = os.path.dirname(config_path)
     for key in [
-        "data_path",
+        "data_path_pi",
         "feature_extractor_path",
-        "mlp_model_path",
-        "scaler_path",
-        "gesture_image_path"
+        "mlp_model_path_pi",
+        "scaler_path_pi",
+        "gesture_image_path_pi"
     ]:
         if key in config and isinstance(config[key], str):
             config[key] = os.path.abspath(os.path.join(config_dir, config[key]))
@@ -60,8 +62,7 @@ def load_config():
     return config
 
 
-def main(shared_data=None):  # <-- CHANGED: accept shared_data
-    # If we are running under main_PI with shared_data, wait for WiFi
+def main(shared_data=None):
     if shared_data is not None:
         print("[realtime] Waiting for WiFi / armband connection...")
         while True:
@@ -107,11 +108,16 @@ def main(shared_data=None):  # <-- CHANGED: accept shared_data
             scaler_path=scaler_path,
             filters=filters,
             model_input_len=model_input_len,
-            gyro_threshold=int(config.get("gyro_threshold", 90)),   # <-- TUNE: 60–120
-            prediction_threshold=float(config.get("prediction_threshold", 0.6)),
-            batch_size=int(config.get("batch_size", 5)),
+            gyro_threshold=int(config.get("gyro_threshold", 90)),
+            prediction_threshold=float(config.get("prediction_threshold", 0.7)),
+            batch_size=int(config.get("batch_size", 6)),
         ):
             print(f"Pred: {prediction}  Probs: {np.round(probabilities, 3) if 'np' in globals() else '…'}")
+
+            if shared_data is not None:
+                print(GESTURE_MAP.get(prediction, 'rest'))
+                shared_data['move'] = GESTURE_MAP.get(prediction, 'rest')
+                shared_data['action'] = 1
 
             if send_to_socket:
                 output_queue.put(prediction)
@@ -126,9 +132,7 @@ def main(shared_data=None):  # <-- CHANGED: accept shared_data
             # socket_thread.join()
         cv2.destroyAllWindows()
 
+
 if __name__ == "__main__":
-    main()  # <-- still works standalone, without shared_data
-
-
-
+    main()
 

@@ -33,17 +33,17 @@ if __name__ == "__main__":
         #     args=(shared_data,)
         # )
 
+         #---------------------------------------------------------
+         #PROCESS 3 — Basic command handler
         # ---------------------------------------------------------
-        #  PROCESS 3 — Basic command handler
-        # ---------------------------------------------------------
-        # p3 = Process(
-        #     target=basic_commands_pi.commands_PI,
-        #     args=(shared_data,)
-        # )
+        p3 = Process(
+             target=basic_commands_pi.commands_PI,
+             args=(shared_data,)
+        )
 
         # ---------------------------------------------------------
         #  PROCESS 4 — Real-time EMG classification
-        # ---------------------------------------------------------
+        # # ---------------------------------------------------------
         p4 = Process(
             target=realtime_pi_classify.main,
             args=(shared_data,)
@@ -52,7 +52,7 @@ if __name__ == "__main__":
         # Start processes
         p1.start()
         # p2.start()
-        # p3.start()
+        p3.start()
         p4.start()
 
         print("All processes started.\nPress Ctrl-C to stop.")
@@ -65,7 +65,7 @@ if __name__ == "__main__":
 
             p1.terminate()
             # p2.terminate()
-            # p3.terminate()
+            p3.terminate()
             p4.terminate()
 
             print("All processes stopped.")
