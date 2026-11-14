@@ -1,0 +1,8 @@
+# PC-side tooling for the phone app. Versions pinned to match the Raspberry Pi (venvPI, Python 3.10.11).
+numpy==1.23.5
+scikit-learn==1.7.2
+tensorflow==2.12.0
+keras==2.12.0
+mindrove==5.2.3            # only imported because training_data.inference_mix imports it
+opencv-python-headless==4.11.0.86  # same, for cv2
+bleak==0.22.3              # only imported because files_for_pi/protocol.py imports it
