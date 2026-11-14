@@ -132,16 +132,34 @@ def golden_model_stages(model_name: str):
         synth += list(rng.dirichlet(alpha, size=yad_ref.BATCH_SIZE))
     synth += list(rng.dirichlet(np.ones(len(mlp.classes_)), size=yad_ref.BATCH_SIZE - 1))
 
-    def case(name, seq_probs):
-        emitted = yad_ref.pi_decisions(list(seq_probs))
+    def case(name, seq_probs, threshold=yad_ref.PREDICTION_THRESHOLD):
+        emitted = yad_ref.pi_decisions(list(seq_probs), threshold=threshold)
         return {"name": name,
+                "threshold": threshold,
                 "per_window_probs": np.asarray(seq_probs).tolist(),
                 "decisions": [{"after_window": i, "gesture": top, "avg": avg.tolist()} for i, top, avg in emitted]}
+
+    # Groups whose top probability sits on and around the threshold, so a shifted threshold
+    # changes the outcome. With the Pi's 0.7, no average of 6 doubles equals 0.7 exactly, so
+    # ">" vs ">=" is tested with 0.5 (six 0.5s average to exactly 0.5); that matters once
+    # the app's sensitivity slider allows other thresholds.
+    n_cls = len(mlp.classes_)
+
+    def groups(tops):
+        rows = []
+        for g, top in enumerate(tops):
+            row = np.full(n_cls, (1 - top) / (n_cls - 1))
+            row[g % n_cls] = top
+            rows += [row.copy() for _ in range(yad_ref.BATCH_SIZE)]
+        return rows
 
     _write("decision.json", {
         "batch_size": yad_ref.BATCH_SIZE,
         "threshold": yad_ref.PREDICTION_THRESHOLD,
-        "cases": [case(f"recorded_{model_name}", probs), case("synthetic_mixed_confidence", synth)],
+        "cases": [case(f"recorded_{model_name}", probs),
+                  case("synthetic_mixed_confidence", synth),
+                  case("threshold_near_0.7", groups([0.69, 0.70, 0.701, 0.72, 0.75, 0.80])),
+                  case("threshold_exactly_0.5", groups([0.49, 0.5, 0.51]), threshold=0.5)],
     })
 
 

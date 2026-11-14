@@ -125,7 +125,7 @@ def main():
     ap.add_argument("--all", action="store_true", help="export every mlp_model_*.pkl in training_data/models")
     ap.add_argument("--rms-over", choices=yad_ref.RMS_OVER,
                     help="feature version; detected from the recording when one exists")
-    ap.add_argument("--out", default=os.path.join(yad_ref.OUT_DIR, "models"))
+    ap.add_argument("--out", default=yad_ref.PHONE_MODELS_DIR)
     args = ap.parse_args()
 
     names = args.models

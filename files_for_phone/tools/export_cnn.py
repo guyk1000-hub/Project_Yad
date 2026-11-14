@@ -5,7 +5,7 @@ to TensorFlow Lite for the phone, and check it against Keras before keeping it.
 Usage (from the repo root):
     files_for_phone/tools/.venv/bin/python files_for_phone/tools/export_cnn.py
 
-Writes files_for_phone/tools/out/models/feature_extractor.tflite (+ .json with metadata
+Writes files_for_phone/models/feature_extractor.tflite (+ .json with metadata
 and the parity report). The .h5 is not modified.
 
 The checks run on every recorded window of every dataset that has an exported head:
@@ -88,7 +88,7 @@ def check(model_bytes: bytes, heads_dir: str) -> dict:
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--out", default=os.path.join(yad_ref.OUT_DIR, "models"))
+    ap.add_argument("--out", default=yad_ref.PHONE_MODELS_DIR)
     args = ap.parse_args()
 
     model_bytes = convert()

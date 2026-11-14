@@ -25,6 +25,7 @@ REPO_ROOT = os.path.abspath(os.path.join(TOOLS_DIR, "..", ".."))  # files_for_ph
 MODELS_DIR = os.path.join(REPO_ROOT, "training_data", "models")
 DATA_DIR = os.path.join(REPO_ROOT, "training_data", "data")
 OUT_DIR = os.path.join(TOOLS_DIR, "out")
+PHONE_MODELS_DIR = os.path.abspath(os.path.join(TOOLS_DIR, "..", "models"))  # exported artifacts the phone app ships
 GOLDEN_DIR = os.path.join(TOOLS_DIR, "golden")
 
 sys.path.insert(0, REPO_ROOT)

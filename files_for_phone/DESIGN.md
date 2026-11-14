@@ -74,6 +74,7 @@ The `.h5` was saved with Keras 2.10, so the export tooling runs in a pinned Pyth
 ```
 files_for_phone/            everything for the phone, alongside files_for_pi/ (the Pi keeps running as-is)
   DESIGN.md                this document
+  models/                  exported artifacts the app ships: head_<user>.json (committed), feature_extractor.tflite (regenerated)
   tools/                   PC-side Python, isolated venv, never imported by the Pi code
     export_head.py         pkl scaler+MLP → head_<user>.json (+ parity check)
     export_cnn.py          h5 → tflite (+ parity check)
@@ -126,7 +127,7 @@ The phone first runs **Pi-compatible mode**: the same decisions every ~1.2 s, to
 |---|---|---|
 | M0 ✅ | `files_for_phone/tools/` environment, `export_head.py`, `make_golden.py`; parity of the JSON head vs sklearn. Done 2026-11-14: 4 heads exported with 100% prediction agreement; `tomer_with_finger` was refused because its model and recording don't match | No |
 | M1 ✅ | `export_cnn.py`; TFLite vs Keras parity; end-to-end accuracy on recordings matches the Python pipeline. Done 2026-11-14: a 19.3 MB float32 model using built-in ops only (no Flex). Over 20,250 windows: feature error ≤1.1e-6, 0 changed predictions | No |
-| M2 | `android/core` + unit tests passing on the golden vectors (JVM, on the PC) | No |
+| M2 ✅ | `android/core` + unit tests passing on the golden vectors (JVM, on the PC). Done 2026-11-14: 12 tests pass; filters bit-identical, head within 6.6e-11, decisions identical; the tests were checked with planted bugs | No |
 | M3 | App skeleton: replay source + simulated hand, inference screen, overrides, sliders | Phone only (install APK) |
 | M4 | **Hardware session A (~15 min, no recording):** armband streaming + units check at rest; hand BLE: manual buttons and e-stop | Phone + armband + hand |
 | M5 | Live inference in Pi-compatible mode. **Session B (~15 min):** perform each gesture for a few seconds, and compare with the Pi if available | Phone + armband + hand |

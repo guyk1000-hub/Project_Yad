@@ -15,8 +15,8 @@ files_for_phone/tools/.venv/bin/pip install -r files_for_phone/tools/requirement
 
 | Script | What it does |
 |---|---|
-| `export_head.py tomer guy` / `--all` | Exports `scaler_<name>.pkl` + `mlp_model_<name>.pkl` to `files_for_phone/tools/out/models/head_<name>.json` for the phone. Before writing, it checks that the JSON gives the same predictions as sklearn on the recorded windows. |
-| `export_cnn.py` | Converts the CNN (`og_feature_extraction.h5`, up to `dense_8`) to `out/models/feature_extractor.tflite`. It keeps the file only if the TFLite features and every exported head's predictions match Keras on all recordings. Run it after `export_head.py`. It takes ~25 min, because it runs single-threaded to mimic one phone core. |
+| `export_head.py tomer guy` / `--all` | Exports `scaler_<name>.pkl` + `mlp_model_<name>.pkl` to `files_for_phone/models/head_<name>.json` for the phone. Before writing, it checks that the JSON gives the same predictions as sklearn on the recorded windows. |
+| `export_cnn.py` | Converts the CNN (`og_feature_extraction.h5`, up to `dense_8`) to `files_for_phone/models/feature_extractor.tflite`. It keeps the file only if the TFLite features and every exported head's predictions match Keras on all recordings. Run it after `export_head.py`. It takes ~25 min, because it runs single-threaded to mimic one phone core. |
 | `make_golden.py --model tomer` | Writes test vectors to `files_for_phone/tools/golden/` (committed). The Kotlin tests must reproduce them. |
 
 Example:

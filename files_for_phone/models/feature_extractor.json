@@ -1,0 +1,61 @@
+{
+ "source_file": "og_feature_extraction.h5",
+ "source_sha256": "dc552b5c4de27807cb05143a7140b7184a45aa96f4d1012cdca072ef86a6726a",
+ "tflite_sha256": "cd9732b9ed8fa680cc16bd5fb77efe0e1f9d418705a90c9557fc3cf8ffe68d20",
+ "tensorflow_version": "2.12.0",
+ "exported_at": "2026-11-14T12:39:17+00:00",
+ "input": {
+  "shape": [
+   1,
+   8,
+   100,
+   1
+  ],
+  "dtype": "float32",
+  "layout": "[batch=1, channel=8, sample=100, 1], filtered \u00b5V as recorded by record.py"
+ },
+ "output": {
+  "name": "dense_8",
+  "shape": [
+   1,
+   1024
+  ],
+  "dtype": "float32"
+ },
+ "parity_check": {
+  "datasets": {
+   "guy": {
+    "windows": 4350,
+    "feature_max_rel_err": 9.414978308086575e-07,
+    "prob_max_abs_diff": 7.143494902817071e-05,
+    "argmax_agreement": 1.0,
+    "flipped_windows": [],
+    "x86_ms_per_window": 79.65
+   },
+   "tomer": {
+    "windows": 4350,
+    "feature_max_rel_err": 6.149293199086969e-07,
+    "prob_max_abs_diff": 4.5834615434725556e-05,
+    "argmax_agreement": 1.0,
+    "flipped_windows": [],
+    "x86_ms_per_window": 78.44
+   },
+   "tomer_250": {
+    "windows": 7200,
+    "feature_max_rel_err": 8.947232004175021e-07,
+    "prob_max_abs_diff": 6.51439922578767e-05,
+    "argmax_agreement": 1.0,
+    "flipped_windows": [],
+    "x86_ms_per_window": 77.89
+   },
+   "tomer_long": {
+    "windows": 4350,
+    "feature_max_rel_err": 1.1096714160885313e-06,
+    "prob_max_abs_diff": 2.471555051808405e-05,
+    "argmax_agreement": 1.0,
+    "flipped_windows": [],
+    "x86_ms_per_window": 75.82
+   }
+  }
+ }
+}
