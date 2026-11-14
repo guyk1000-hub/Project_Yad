@@ -114,12 +114,18 @@ A new model is accepted only if it does no worse on held-out data. Every version
 
 The phone first runs **Pi-compatible mode**: the same decisions every ~1.2 s, to prove parity. Then it adds a **sliding-window mode**: decisions every ~100 ms from a rolling average of recent windows. This is checked offline by replaying the recordings, so the decisions are compared before anyone wears the armband. Stage timings are logged in the app.
 
+**The CNN cost (measured in M1):**
+- About 3.7 G multiply-adds per window. That's ~78 ms per window on one core of a Xeon PC, against 200 ms of signal per window.
+- Pi-compatible mode needs 1 window per 200 ms. That's comfortable on the phone (S23 FE, Exynos 2200) with 2–4 XNNPACK threads, which M3 will measure.
+- Sliding-window mode is limited by this cost: a new window every 50 ms needs under 50 ms per window. If needed: more threads, the GPU delegate, or fp16 (only if parity holds).
+- *Hypothesis about the Pi's latency (unmeasured):* the Pi 5 runs this CNN in full Keras on batches of 6. If it can't keep up with 1 window per 200 ms, its queue grows and the delay keeps increasing over a session. A timing log on the Pi would confirm or rule this out.
+
 ## 9. Milestones
 
 | # | Milestone | Needs hardware? |
 |---|---|---|
 | M0 ✅ | `files_for_phone/tools/` environment, `export_head.py`, `make_golden.py`; parity of the JSON head vs sklearn. Done 2026-11-14: 4 heads exported with 100% prediction agreement; `tomer_with_finger` was refused because its model and recording don't match | No |
-| M1 | `export_cnn.py`; TFLite vs Keras parity; end-to-end accuracy on recordings matches the Python pipeline | No |
+| M1 ✅ | `export_cnn.py`; TFLite vs Keras parity; end-to-end accuracy on recordings matches the Python pipeline. Done 2026-11-14: a 19.3 MB float32 model using built-in ops only (no Flex). Over 20,250 windows: feature error ≤1.1e-6, 0 changed predictions | No |
 | M2 | `android/core` + unit tests passing on the golden vectors (JVM, on the PC) | No |
 | M3 | App skeleton: replay source + simulated hand, inference screen, overrides, sliders | Phone only (install APK) |
 | M4 | **Hardware session A (~15 min, no recording):** armband streaming + units check at rest; hand BLE: manual buttons and e-stop | Phone + armband + hand |
