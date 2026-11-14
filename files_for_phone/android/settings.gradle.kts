@@ -17,3 +17,5 @@ rootProject.name = "ProjectYadPhone"
 
 // Pure Kotlin, no Android dependency: the signal pipeline, testable on a PC.
 include(":core")
+// The Android app.
+include(":app")

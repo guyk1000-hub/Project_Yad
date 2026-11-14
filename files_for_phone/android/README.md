@@ -3,7 +3,18 @@
 | Module | What it is | Status |
 |---|---|---|
 | `core/` | Pure Kotlin, no Android dependency: filters, windowing, `asym`/`mag` (both versions), the MLP head, the Pi's decision policy, and the Haifa3D command bytes | M2 ✅ |
-| `ml/`, `armband/`, `hand/`, `data/`, `app/` | TFLite, MindRove, BLE, storage, UI | M3+ |
+| `app/` | The Android app. M3 replays recordings through the real pipeline (TFLite CNN + head + decision policy) into a simulated hand. It has STOP, manual buttons, sensitivity sliders, stats, a CNN benchmark, and an on-device parity check at startup | M3 🔨 |
+
+## Build the app
+
+Needs the Android SDK (`local.properties`: `sdk.dir=...`) and the TFLite model, which isn't committed. Generate it first:
+
+```bash
+files_for_phone/tools/.venv/bin/python files_for_phone/tools/export_cnn.py      # once, ~25 min
+files_for_phone/tools/.venv/bin/python files_for_phone/tools/export_replay.py tomer guy tomer_long
+cd files_for_phone/android && ./gradlew :app:assembleDebug
+# -> app/build/outputs/apk/debug/app-debug.apk
+```
 
 ## Run the tests
 

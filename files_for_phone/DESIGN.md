@@ -82,12 +82,13 @@ files_for_phone/            everything for the phone, alongside files_for_pi/ (t
     import_recording.py    phone recording → (recorded_data, recorded_labels) .pkl for fine_tune.py
     requirements.txt
   android/                 Kotlin app (Gradle)
-    core/                  pure Kotlin, JVM-testable: filters, windowing, features, head, decision policies
-    ml/                    TFLite wrapper
-    armband/               MindRove SDK adapter (+ replay source)
-    hand/                  HandSink interface, Haifa3D BLE, simulated hand
-    data/                  profiles, model registry, recordings, settings
-    app/                   Jetpack Compose UI
+    core/                  pure Kotlin, JVM-testable: filters, windowing, features, head, decision policies,
+                           command gate (Stop), replay file reader
+    app/                   the Android app, one module with packages (split into modules only if it starts to hurt):
+      ml/                  TFLite feature extractor
+      hand/                simulated hand (M3), Haifa3D BLE (M4)
+      armband/             MindRove SDK source (M4)
+      ui/                  Jetpack Compose screens
 ```
 
 ## 7. App features
@@ -128,7 +129,7 @@ The phone first runs **Pi-compatible mode**: the same decisions every ~1.2 s, to
 | M0 ✅ | `files_for_phone/tools/` environment, `export_head.py`, `make_golden.py`; parity of the JSON head vs sklearn. Done 2026-11-14: 4 heads exported with 100% prediction agreement; `tomer_with_finger` was refused because its model and recording don't match | No |
 | M1 ✅ | `export_cnn.py`; TFLite vs Keras parity; end-to-end accuracy on recordings matches the Python pipeline. Done 2026-11-14: a 19.3 MB float32 model using built-in ops only (no Flex). Over 20,250 windows: feature error ≤1.1e-6, 0 changed predictions | No |
 | M2 ✅ | `android/core` + unit tests passing on the golden vectors (JVM, on the PC). Done 2026-11-14: 12 tests pass; filters bit-identical, head within 6.6e-11, decisions identical; the tests were checked with planted bugs | No |
-| M3 | App skeleton: replay source + simulated hand, inference screen, overrides, sliders | Phone only (install APK) |
+| M3 🔨 | App skeleton: replay source + simulated hand, inference screen, overrides, sliders. Built 2026-11-14: replay of 3 users, STOP, manual buttons, sliders + Pi preset, stats, CNN benchmark, and an on-device parity check at startup. Installed on the S23 FE: the on-device check passed (CNN rel. error 8.4e-7, probabilities ±4.3e-10, 10/10 windows). Benchmark pending | Phone only (install APK) |
 | M4 | **Hardware session A (~15 min, no recording):** armband streaming + units check at rest; hand BLE: manual buttons and e-stop | Phone + armband + hand |
 | M5 | Live inference in Pi-compatible mode. **Session B (~15 min):** perform each gesture for a few seconds, and compare with the Pi if available | Phone + armband + hand |
 | M6 | Sliding-window latency mode (offline-tuned first) | Brief check in a later session |
