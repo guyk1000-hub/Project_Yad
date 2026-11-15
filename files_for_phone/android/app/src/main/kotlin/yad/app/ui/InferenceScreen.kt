@@ -27,6 +27,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -56,6 +57,7 @@ import yad.app.UiState
 import yad.app.displayName
 import yad.core.Calibration
 import yad.core.HandCommand
+import yad.core.ModelNames
 import kotlin.math.roundToInt
 
 private val StopRed = Color(0xFFD32F2F)
@@ -269,7 +271,7 @@ private fun ArmbandSection(
 private fun TrainSection(s: UiState, vm: InferenceViewModel) {
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { vm.importRecordings(it) }
     val live = s.source == Source.ARMBAND && s.running
-    val user = s.model?.substringBefore('@')?.removeSuffix("-phone") ?: "?"
+    val user = s.model?.let { ModelNames.userOf(it) } ?: "?"
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("Record, train & check", style = MaterialTheme.typography.titleMedium)
@@ -282,6 +284,11 @@ private fun TrainSection(s: UiState, vm: InferenceViewModel) {
                 Text("Record: hold each gesture for 10 s, ${Calibration.RECORDING_TAKES} times (~3 min). Quick calibration: once (~1 min). " +
                     "Afterwards the phone trains $user's model from zero on all of $user's recordings and saves it as a new version.",
                     style = MaterialTheme.typography.bodySmall)
+                OutlinedTextField(
+                    value = s.newModelLabel, onValueChange = vm::setNewModelLabel, singleLine = true,
+                    label = { Text("Name for the new model (optional)") },
+                    supportingText = { Text("Saved as \"$user · ${ModelNames.cleanLabel(s.newModelLabel)} · <date time>\"; existing models are never replaced") },
+                )
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = { vm.startRecording(Calibration.RECORDING_TAKES) }, enabled = live) { Text("Record") }
                     OutlinedButton(onClick = { vm.startRecording(1) }, enabled = live) { Text("Quick calibration") }

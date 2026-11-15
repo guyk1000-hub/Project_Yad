@@ -2,6 +2,7 @@ package yad.app
 
 import android.content.Context
 import yad.core.MlpHead
+import yad.core.ModelNames
 import yad.core.ReplayRecording
 import java.io.File
 
@@ -10,16 +11,13 @@ import java.io.File
  * offered when head_<user>.json and replay_<user>.bin exist), plus versions made on this phone,
  * stored as files/models/<name>.json:
  * - <user>@<yyyyMMdd_HHmm[ss]>: calibrated (the PC recording + a short phone recording);
- * - <user>-phone@<yyyyMMdd_HHmmss>: trained from zero on the user's phone recordings.
- * Names are never reused: saving refuses to overwrite.
+ * - <user>-<label>@<yyyyMMdd_HHmmss>: trained from zero on the user's phone recordings.
+ * (see yad.core.ModelNames). Names are never reused: saving refuses to overwrite.
  *
  * The phone recordings live in files/recordings/<user>/rec_<user>_<time>.bin, each with its head
  * inputs cached next to it (.feat). A phone-made version uses its user's bundled replay.
  */
 class ModelCatalog(private val context: Context) {
-    companion object {
-        const val PHONE_SUFFIX = "-phone"
-    }
 
     private val calibratedDir = File(context.filesDir, "models").apply { mkdirs() }
 
@@ -41,7 +39,7 @@ class ModelCatalog(private val context: Context) {
             return bundled + calibrated
         }
 
-    fun userOf(name: String): String = name.substringBefore('@').removeSuffix(PHONE_SUFFIX)
+    fun userOf(name: String): String = ModelNames.userOf(name)
 
     /** Made on this phone (calibrated or trained from zero), so it can be deleted. */
     fun isPhoneMade(name: String) = '@' in name
@@ -52,7 +50,7 @@ class ModelCatalog(private val context: Context) {
 
     /** Newest version of [user] trained from zero on phone recordings, if any. */
     fun latestPhoneTrained(user: String): String? =
-        names.filter { it.startsWith("$user$PHONE_SUFFIX@") }.maxByOrNull { it.substringAfter('@') }
+        names.filter { ModelNames.isPhoneTrained(it) && userOf(it) == user }.maxByOrNull { it.substringAfter('@') }
 
     fun head(name: String): MlpHead = MlpHead.fromJson(
         if (isPhoneMade(name)) File(calibratedDir, "$name.json").readText()

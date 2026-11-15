@@ -29,30 +29,27 @@ Owners: Guy Katabi and Tomer Ohayon. Repo: github.com/guyk1000-hub/Project_Yad, 
 
 ## State
 
-- **On GitHub:** M0–M5 (up to `6e12775`).
-- **Session B (15 Nov) done for Tomer** (see REPORT_NOTES.md E-calib, E-calib2): calibrated
-  models reached 90–94% on separate guided checks (from 74%). On the PC, the old PC recording made
-  every variant worse, and training only on the two phone recordings was best (99 / 91 / 98%).
-  LEFT ↔ RIGHT is the weakest pair. Guy was skipped for now (the user's call).
-- **Committed locally, not pushed:** M5b (APK `~/ProjectYad-0.6.0.apk`, 0.6.0-m5b). Record (3 × 10 s
-  per gesture) or quick calibration (1 take), then train from zero on all of the user's phone
-  recordings; import/delete recordings; phone models `<user>-phone@yyyyMMdd_HHmmss`, never
-  overwritten; every phone model also exported to Downloads as `yad_model_<name>.json`.
-  `analyze_check.py` reads those (`--head`) and can redo a calibration on the PC (`--calib`).
-  **Not yet tested on hardware.**
+- **On GitHub:** M0–M5 (up to `6e12775`). **Local, not pushed:** M5b + model names (see git log).
+- **Tomer works:** the first model trained from zero on the phone (one 3-min recording) scored
+  **100%** on the guided check right after (REPORT_NOTES.md, E-phone). The user is happy with it.
+  On data from 30–80 min earlier it scored 76–89%: the signal drifts, so a later calibration adds
+  recordings. Guy was skipped for now (the user's call).
+- **APK `~/ProjectYad-0.6.1.apk`:** like 0.6.0 (Record / Quick calibration → train from zero on all of
+  the user's phone recordings; import/delete recordings; every model exported to Downloads as JSON),
+  plus an optional **name for the new model**: saved as `<user>-<label>@yyyyMMdd_HHmmss`, shown as
+  "tomer · label · 15/11 18:40" (`core/ModelNames.kt`). The time keeps names unique; saving never
+  overwrites. 0.6.1 is not yet on the phone.
 - Session files: `tools/out/checks/` (git-ignored: personal data).
 
 ## Next steps
 
-1. **Hardware session C (Tomer):** install 0.6.0. Import the two `yad_calib_tomer_20261115_*.bin`
-   (→ `tomer-phone@…`), Start armband, guided check. Then **Record** (3 takes), guided check, wait
-   ~5 min, guided check again. Ask for: screenshots, the training-time message, `rec_tomer_*.bin`,
-   `yad_check_tomer-phone@*.bin`, `yad_model_tomer-phone@*.json`.
-2. Analyse (`analyze_check.py --head …`). If LEFT stays weak: more LEFT data, or check the LEFT/RIGHT gestures themselves.
-3. Then, in rough priority: new users without a bundled PC model (profiles), a simpler main
-   screen with settings out of the way, lower latency (sliding window; the 94.9 ms no-XNNPACK
-   engine as default), learning from "that was wrong" corrections. The bundled `train_*.bin`
-   (18 MB in the APK) are no longer used by the app.
+1. Next hardware time: install 0.6.1, Tomer does a **Quick calibration** (1 min, optionally named)
+   and a guided check. Send `rec_tomer_*.bin`, the check file and the `yad_model_*.json`.
+2. Guy: a full **Record** (3 min) on his own profile, then a guided check.
+3. Then, in rough priority: a simpler UI (sketched in the 15 Nov chat; the user said "improve as we
+   go"); new users without a bundled PC model (profiles); lower latency (sliding window; the
+   94.9 ms no-XNNPACK engine as default); learning from "that was wrong" corrections. The bundled
+   `train_*.bin` (18 MB in the APK) are no longer used by the app.
 
 ## Environment (this dev machine)
 

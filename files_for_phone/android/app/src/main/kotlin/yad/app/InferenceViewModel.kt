@@ -94,6 +94,7 @@ data class UiState(
     val checkStatus: String? = null,
     val trainingStatus: String? = null,
     val recordings: List<RecordingInfo> = emptyList(),
+    val newModelLabel: String = "",
 ) {
     val decisionEveryMs: Int get() = groupSize * WINDOW_MS
 
@@ -116,13 +117,8 @@ const val WINDOW_MS = 200            // 100 samples at 500 Hz
 const val SAMPLE_RATE = 500
 const val PI_THRESHOLD = 0.7
 
-/** "guy@20261115_1430" -> "guy · 15/11 14:30"; bundled names unchanged. */
-fun displayName(name: String): String {
-    val at = name.indexOf('@')
-    if (at < 0 || name.length < at + 14) return name
-    val t = name.substring(at + 1)
-    return "${name.substring(0, at)} · ${t.substring(6, 8)}/${t.substring(4, 6)} ${t.substring(9, 11)}:${t.substring(11, 13)}"
-}
+fun displayName(name: String): String = yad.core.ModelNames.display(name)
+
 const val PI_GROUP_SIZE = 6
 private const val LOG_SIZE = 40
 private const val TIMING_WINDOW = 50
@@ -461,6 +457,8 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(checkPrompt = null, checkStep = null, checkResults = results, checkStatus = saved) }
     }
 
+    fun setNewModelLabel(label: String) = _state.update { it.copy(newModelLabel = label) }
+
     /** Retrains the current user's model on their phone recordings (no armband needed). */
     fun retrain() {
         val user = catalog.userOf(_state.value.model ?: return)
@@ -472,7 +470,7 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
 
     /**
      * Worker thread: trains [user]'s model from zero on all their phone recordings (not the PC
-     * recording), saves it as a new "<user>-phone@<time>" version and selects it.
+     * recording), saves it as a new "<user>-<label>@<time>" version (label from the name field) and selects it.
      */
     private fun trainFromRecordings(user: String, afterNewRecording: Boolean) {
         val fx = extractor ?: return
@@ -494,7 +492,7 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
                 true
             }
             val secs = (System.nanoTime() - t0) / 1_000_000_000
-            val name = "$user${ModelCatalog.PHONE_SUFFIX}@${timestamp()}"
+            val name = yad.core.ModelNames.phoneTrained(user, _state.value.newModelLabel, timestamp())
             val note = "trained on the phone from zero: ${files.size} recordings (${files.joinToString { it.name }}), " +
                 "${data.size} windows, ${result.iterations} iterations"
             val json = result.toHeadJson(name, base.rmsOver, base.classNames, note)

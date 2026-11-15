@@ -203,6 +203,25 @@ Findings:
   equals the Python windowing (445 windows each, same labels). Kotlin training from zero on both
   calibrations scores **97 / 93 / 97%** on the three checks (sklearn: 99 / 92 / 98%), in 19 s on the PC.
 
+### E-phone: first model trained from zero on the phone (Tomer, 15 Nov, 18:36)
+
+One full phone recording (3 takes × 10 s per gesture, 1335 windows), trained from zero on the
+phone (`tomer-phone@20261115_184045`). Guided check right after (18:41): **100%**, 120/120
+windows, every gesture 100%. The PC rerun of the exported model gives the same probabilities
+(max |Δp| 1.7e-7). The user: "working perfectly".
+
+The same model on the session's earlier checks (data from before the recording):
+
+| Check | Minutes before the recording | Accuracy | CLOSE | LEFT |
+|---|---|---|---|---|
+| 17:18 | 78 | 76% | 0 | 100 |
+| 18:02 | 34 | 85% | 79 | 54 |
+| 18:05 | 31 | 89% | 67 | 92 |
+| 18:41 (after) | — | **100%** | 100 | 100 |
+
+The signal drifts over an hour, so a single recording is best near the time it was made. Hence
+the short calibrations, which add recordings over time.
+
 ## Decisions log
 
 | Date | Decision | Why |
@@ -216,6 +235,7 @@ Findings:
 | 2026-11-15 | fine_tune.py reports held-out-take accuracy | Honest number |
 | 2026-11-15 | Phone exports each calibrated model (JSON) | So checks with it can be re-run on the PC |
 | 2026-11-15 | Record and train from zero on the phone, on all of a person's phone recordings; old PC data dropped | E-calib2 (user's idea) |
+| 2026-11-15 | User-chosen model names: `<user>-<label>@<time>` | The user wanted names; the time keeps them unique |
 | 2026-11-15 | Train on the phone (own L-BFGS), not on the PC | No PC round trip each session; matches sklearn offline |
 
 ## Ethics notes (to expand)
