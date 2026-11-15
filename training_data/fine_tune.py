@@ -1,5 +1,5 @@
 
-from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.neural_network import MLPClassifier
 from keras.models import Model, load_model
@@ -42,6 +42,43 @@ def _magnitude_feature(batch_windows: np.ndarray) -> np.ndarray:
     mag = np.mean(rms, axis=1, keepdims=True)      # [N, 1]
     return mag.astype(np.float32)
 
+
+def _takes(labels: np.ndarray) -> np.ndarray:
+    """
+    Take number of each window: record.py records each gesture several times ("takes"), so a take
+    is a contiguous run of one label. The first run of each gesture is take 0, the next take 1, ...
+    """
+    takes = np.zeros(len(labels), dtype=int)
+    seen = {}
+    for i, lab in enumerate(labels):
+        if i == 0 or labels[i - 1] != lab:
+            seen[lab] = seen.get(lab, -1) + 1
+        takes[i] = seen[lab]
+    return takes
+
+
+def _held_out_take_accuracy(features: np.ndarray, labels: np.ndarray):
+    """
+    Honest accuracy estimate: for each take k, train a fresh scaler + MLP (same settings as
+    fine_tune_model) on the other takes and test on take k. Returns the mean, or None when there
+    is only one take per gesture. Doesn't change the saved model.
+    """
+    takes = _takes(labels)
+    common = sorted(set.intersection(*(set(takes[labels == c]) for c in np.unique(labels))))
+    if len(common) < 2:
+        return None
+    scores = []
+    for k in common:
+        test = takes == k
+        sc = StandardScaler().fit(features[~test])
+        m = MLPClassifier(hidden_layer_sizes=(32, 16), max_iter=20000, random_state=42,
+                          activation='tanh', solver='lbfgs', alpha=0.01, learning_rate='constant')
+        m.fit(sc.transform(features[~test]), labels[~test])
+        scores.append(m.score(sc.transform(features[test]), labels[test]))
+        logging.info(f"  held-out take {k}: {scores[-1]:.4f}")
+    return float(np.mean(scores))
+
+
 def fine_tune_model(
     feature_extractor_path,
     recorded_data,
@@ -62,23 +99,20 @@ def fine_tune_model(
     X = np.asarray(recorded_data, dtype=np.float32)  # [N, L, 8, 1]
     y = np.asarray(recorded_labels, dtype=np.int32)
 
-    X_train, X_val, y_train, y_val = train_test_split(
-        X, y, test_size=0.2, random_state=42, stratify=y
+    # Same split as before, done on indices so the honest evaluation below can reuse the features.
+    idx_train, idx_val = train_test_split(
+        np.arange(len(y)), test_size=0.2, random_state=42, stratify=y
     )
+    X_train, X_val, y_train, y_val = X[idx_train], X[idx_val], y[idx_train], y[idx_val]
 
     # CNN feature extractor (keep layer name aligned with your model)
     feature_extractor = Model(inputs=model.input, outputs=model.get_layer("dense_8").output)
-    feats_train = feature_extractor.predict(X_train, verbose=0)  # [N, D]
-    feats_val   = feature_extractor.predict(X_val,   verbose=0)  # [N, D]
+    feats_all = feature_extractor.predict(X, verbose=0)  # [N, D]
 
     # Add 2 scalar features
-    a_train = _side_asymmetry_feature(X_train)  # [N,1]
-    a_val   = _side_asymmetry_feature(X_val)    # [N,1]
-    m_train = _magnitude_feature(X_train)       # [N,1]
-    m_val   = _magnitude_feature(X_val)         # [N,1]
-
-    feats_train_plus = np.hstack([feats_train, a_train, m_train])  # [N, D+2]
-    feats_val_plus   = np.hstack([feats_val,   a_val,   m_val])    # [N, D+2]
+    feats_all_plus = np.hstack([feats_all, _side_asymmetry_feature(X), _magnitude_feature(X)])  # [N, D+2]
+    feats_train_plus = feats_all_plus[idx_train]
+    feats_val_plus   = feats_all_plus[idx_val]
 
     # Scale & train
     scaler = StandardScaler()
@@ -100,9 +134,18 @@ def fine_tune_model(
         learning_rate='constant',
     )
     mlp.fit(X_train_scaled, y_train)
-    mlp_accuracy = mlp.score(X_val_scaled, y_val)
-    logging.info(f"MLP validation accuracy: {mlp_accuracy}")
-    logging.info(f"MLP cross-validation accuracy: {cross_val_score(mlp, X_train_scaled, y_train, cv=5)}")
+    split_accuracy = mlp.score(X_val_scaled, y_val)
+    # Optimistic: neighbouring windows overlap by 90%, so a random split puts near-copies of the
+    # training windows in the validation set.
+    logging.info(f"MLP validation accuracy (random split, optimistic): {split_accuracy:.4f}")
+
+    honest = _held_out_take_accuracy(feats_all_plus, y)
+    if honest is None:
+        logging.warning("Only one take per gesture: can't hold one out, reporting the random split.")
+        mlp_accuracy = split_accuracy
+    else:
+        mlp_accuracy = honest
+        logging.info(f"MLP held-out-take accuracy (honest): {mlp_accuracy:.4f}")
 
     with open(mlp_model_path, "wb") as f:
         pickle.dump(mlp, f)
