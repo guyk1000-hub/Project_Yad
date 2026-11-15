@@ -51,7 +51,20 @@ The user's goals for the next sessions (given 15 Nov): **lower latency to an acc
 more robust system, better UI/UX.** The plan below was proposed at the end of 15 Nov and still
 needs the user's OK.
 
-### 0. First build a measuring stick (PC, no hardware)
+### 0. Measuring stick: DONE (`tools/bench.py`, 15 Nov), first results in REPORT_NOTES E-latency
+
+- **Best so far:** classic TD features (no CNN) + "3 agree, every 200 ms, ≥ 0.7". Median latency
+  1.0 s vs 1.8 s today, 0 wrong moves, 100% accuracy, on Tomer's 8 files.
+- **Next on the bench:**
+  - rules with a dwell or hysteresis, or a stricter threshold for leaving REST (half the wrong
+    moves are transitions);
+  - training on onset windows too;
+  - a 100 ms window for TD;
+  - Guy's data.
+- **Then on the phone:** TD features in Kotlin with golden tests (bench.td_features is the
+  reference), the rule as a new DecisionPolicy, and a sliding hop.
+
+### 0 (original plan text)
 
 `tools/bench.py`: replays every labelled phone recording (`rec_*`, `yad_calib_*`, `yad_check_*`
 in `tools/out/checks/`) through a pipeline configuration and reports, per gesture:

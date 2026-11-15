@@ -222,6 +222,38 @@ The same model on the session's earlier checks (data from before the recording):
 The signal drifts over an hour, so a single recording is best near the time it was made. Hence
 the short calibrations, which add recordings over time.
 
+### E-latency: decision rules and features on the bench (Tomer, 8 files, 6.7 min of gestures)
+
+`tools/bench.py` replays the labelled phone files at a 50 ms hop. Each file is scored with a model
+trained on the other 7 (leave one file out; the 14 Nov check is a different day). Latency =
+from the on-screen cue to the first correct decision, so it includes the person's own reaction
+time (~0.3–0.5 s). A wrong move = the hand switching to a gesture that is neither the one being
+held nor the one just before it. Phone compute time is not included.
+
+| Features | Rule | Median latency | p90 | Reached | Steady accuracy | Wrong moves/min |
+|---|---|---|---|---|---|---|
+| CNN (today) | today: groups of 6 × 200 ms, ≥ 0.7 | 1.8 s | 3.0 s | 98% | 98% | 0 |
+| CNN | 4 agree, every 200 ms, ≥ 0.7 | 1.4 s | 2.0 s | 98% | 99% | 0 |
+| CNN | 3 agree, every 100 ms, ≥ 0.9 | 1.0 s | 1.5 s | 98% | 99% | 2.1 |
+| CNN | sliding avg of 2, every 50 ms, ≥ 0.7 | 0.7 s | 1.0 s | 100% | 96% | 11.1 |
+| **Classic (40 TD features, no CNN)** | today's rule | 1.8 s | 2.6 s | 100% | **100%** | 0 |
+| **Classic** | **3 agree, every 200 ms, ≥ 0.7** | **1.0 s** | **1.6 s** | 100% | 100% | **0** |
+| Classic | 4 agree, every 100 ms, ≥ 0.9 | 0.9 s | 1.6 s | 100% | 100% | 0.75 |
+| Classic | sliding avg of 2, every 50 ms, ≥ 0.7 | 0.6 s | 0.9 s | 100% | 99% | 7.4 |
+
+Classic features = MAV, RMS, waveform length, zero crossings and slope sign changes per channel
+(Hudgins), with the same MLP. Compared with the CNN (~95 ms per window on the S23 FE), they take
+microseconds.
+
+Findings:
+1. Most of today's latency is the decision rule (averaging 6 × 200 ms), not the model.
+2. The classic features are at least as accurate as the CNN for a per-user model (14 Nov file:
+   100% vs 79% with today's rule). They make fewer wrong moves at every speed and cost almost no compute.
+3. Faster rules trade latency for wrong moves. About half of those happen in the first second
+   after a gesture change (most often OPEN flashing on the way from REST to CLOSE). The other
+   half come during steady holds.
+4. Caveat: one person, one main day, 6.7 min of data. To be confirmed with Guy and on other days.
+
 ## Decisions log
 
 | Date | Decision | Why |
@@ -236,6 +268,7 @@ the short calibrations, which add recordings over time.
 | 2026-11-15 | Phone exports each calibrated model (JSON) | So checks with it can be re-run on the PC |
 | 2026-11-15 | Record and train from zero on the phone, on all of a person's phone recordings; old PC data dropped | E-calib2 (user's idea) |
 | 2026-11-15 | User-chosen model names: `<user>-<label>@<time>` | The user wanted names; the time keeps them unique |
+| 2026-11-15 | Bench every latency idea offline first (`tools/bench.py`) | Latency vs wrong moves is a trade-off: measure it |
 | 2026-11-15 | Train on the phone (own L-BFGS), not on the PC | No PC round trip each session; matches sklearn offline |
 
 ## Ethics notes (to expand)
