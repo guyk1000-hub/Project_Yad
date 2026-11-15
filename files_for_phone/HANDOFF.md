@@ -29,7 +29,7 @@ Owners: Guy Katabi and Tomer Ohayon. Repo: github.com/guyk1000-hub/Project_Yad, 
 
 ## State
 
-- **On GitHub:** M0–M5 (up to `6e12775`). **Local, not pushed:** M5b + model names (see git log).
+- **Branch `phone-app`:** M0–M5b and model names, pushed at the end of 15 Nov (if the push failed, the user pushes).
 - **Tomer works:** the first model trained from zero on the phone (one 3-min recording) scored
   **100%** on the guided check right after (REPORT_NOTES.md, E-phone). The user is happy with it.
   On data from 30–80 min earlier it scored 76–89%: the signal drifts, so a later calibration adds
@@ -43,13 +43,75 @@ Owners: Guy Katabi and Tomer Ohayon. Repo: github.com/guyk1000-hub/Project_Yad, 
 
 ## Next steps
 
-1. Next hardware time: install 0.6.1, Tomer does a **Quick calibration** (1 min, optionally named)
-   and a guided check. Send `rec_tomer_*.bin`, the check file and the `yad_model_*.json`.
-2. Guy: a full **Record** (3 min) on his own profile, then a guided check.
-3. Then, in rough priority: a simpler UI (sketched in the 15 Nov chat; the user said "improve as we
-   go"); new users without a bundled PC model (profiles); lower latency (sliding window; the
-   94.9 ms no-XNNPACK engine as default); learning from "that was wrong" corrections. The bundled
-   `train_*.bin` (18 MB in the APK) are no longer used by the app.
+Hardware, whenever there's time: install 0.6.1. Tomer does a **Quick calibration** (1 min,
+optionally named) and a guided check. Guy does a full **Record** (3 min), then a guided check. Ask
+for the `rec_*.bin`, the check files and the `yad_model_*.json`, plus the training time.
+
+The user's goals for the next sessions (given 15 Nov): **lower latency to an accurate reading, a
+more robust system, better UI/UX.** The plan below was proposed at the end of 15 Nov and still
+needs the user's OK.
+
+### 0. First build a measuring stick (PC, no hardware)
+
+`tools/bench.py`: replays every labelled phone recording (`rec_*`, `yad_calib_*`, `yad_check_*`
+in `tools/out/checks/`) through a pipeline configuration and reports, per gesture:
+- **accuracy**;
+- **latency**: from gesture onset to the first correct command;
+- **wrong commands per minute**: false moves are the safety cost of speed.
+
+Validation is always across recordings: train on some, test on another. Every idea below is scored
+this way before it reaches the phone.
+
+### 1. Latency (biggest lever: the decision rule, not the CNN)
+
+Today: 200 ms windows, non-overlapping, 6 averaged, threshold 0.7. That gives one decision per
+1.2 s, and a gesture change often costs 1.2–2.4 s.
+- **Sliding windows:** a new 200 ms window every 50–100 ms, instead of every 200 ms.
+- **A faster decision rule:** e.g. "k consecutive windows agree with p > θ", with hysteresis.
+  Tune k and θ on the bench: the target is ~300–500 ms with no more wrong commands than today.
+- **CNN speed** (94.9 ms/window; a 50 ms hop needs < 50 ms):
+  - make no-XNNPACK × 4 threads the default engine;
+  - run 2 interpreters in parallel;
+  - try int8 / dynamic-range quantization, checking accuracy on the bench;
+  - try features from an earlier CNN layer.
+- **Alternative: no CNN.** Classic EMG features (MAV, RMS, WL, ZC, SSC per channel) feeding the
+  same MLP take microseconds, and work with 100 ms windows. Now that training is per user on phone
+  data, they may match the CNN. Compare on the bench.
+- **Measure the real chain on the phone:** packet arrival → window → decision → BLE write done.
+  Add timestamps and show them in Stats.
+
+### 2. Robustness
+
+- **Drift:** keep adding short calibrations (already possible). Try weighting the newest
+  recordings higher, or keeping only the last N.
+- **Augmentation when training:** rotate channels ±1 (armband shift), scale gain ±20%, add noise.
+  This makes models tolerant of placement; check it on the bench.
+- **LEFT ↔ RIGHT confusion:** more data for those two, or pick more distinct gestures.
+- **Signal-quality guard:**
+  - flag a flat, saturated or noisy channel, packet loss, or low battery (battery is in WUA2 byte 72);
+  - pause commands while the signal is bad.
+- **Keep the app alive:**
+  - run as an Android foreground service, so the screen can be off;
+  - reconnect to the armband and the hand automatically;
+  - train in the background with a notification.
+- **Learn from mistakes:** a "that was wrong" button logs the window; it becomes training data.
+
+### 3. UI/UX (the user said "improve as we go")
+
+- Sketch, one screen in order: **Person → Armband (✓ 500/s) → Train (Record / Quick
+  calibration) → Check → Use** (big gesture display, big STOP, hand switch, manual buttons).
+  Everything else goes under a closed "Advanced" section.
+- Profiles for new people without a bundled PC model. A model manager: rename, delete, see what
+  each model was trained on.
+- Recording prompts that don't need eyes on the screen: vibration or sound at each phase change,
+  and a big countdown.
+- Show training progress with a time estimate.
+- The bundled `train_*.bin` (18 MB in the APK) are no longer used by the app: drop them from the APK.
+
+### Suggested order
+
+bench → sliding window + decision rule (on the bench, then a short hardware check) → CNN engine
+default and quantization → robustness items → UI pass.
 
 ## Environment (this dev machine)
 
