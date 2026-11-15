@@ -12,8 +12,8 @@ android {
         applicationId = "yad.app"
         minSdk = 33          // Galaxy S23 FE launched with Android 13
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.3.0-m3"
+        versionCode = 6
+        versionName = "0.4.4-m4"
         ndk { abiFilters += "arm64-v8a" }   // the S23 FE; keeps the APK small
     }
 
@@ -69,6 +69,11 @@ dependencies {
     implementation(project(":core"))
 
     implementation("org.tensorflow:tensorflow-lite:2.16.1")
+    implementation("org.tensorflow:tensorflow-lite-gpu:2.16.1")
+    implementation("org.tensorflow:tensorflow-lite-gpu-api:2.16.1")
+    // MindRove Android SDK v4.1 (Apache-2.0, libs/MINDROVE_SDK_LICENSE). Only its packet decoder is used.
+    implementation(files("libs/mindRove-release_v4_1.aar"))
+    implementation("androidx.core:core-ktx:1.15.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.1")
 

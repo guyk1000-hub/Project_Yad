@@ -153,13 +153,20 @@ def golden_model_stages(model_name: str):
             rows += [row.copy() for _ in range(yad_ref.BATCH_SIZE)]
         return rows
 
+    # The phone's replay (every 10th recorded window, see export_replay.py) with its true labels.
+    rep = np.arange(0, len(X), 10)
+    replay_probs = mlp.predict_proba(scaler.transform(yad_ref.head_inputs(X[rep], cnn_all[rep], rms_over)))
+    replay_case = case(f"replay_{model_name}_labelled", replay_probs)
+    replay_case["labels"] = y[rep].tolist()
+
     _write("decision.json", {
         "batch_size": yad_ref.BATCH_SIZE,
         "threshold": yad_ref.PREDICTION_THRESHOLD,
         "cases": [case(f"recorded_{model_name}", probs),
                   case("synthetic_mixed_confidence", synth),
                   case("threshold_near_0.7", groups([0.69, 0.70, 0.701, 0.72, 0.75, 0.80])),
-                  case("threshold_exactly_0.5", groups([0.49, 0.5, 0.51]), threshold=0.5)],
+                  case("threshold_exactly_0.5", groups([0.49, 0.5, 0.51]), threshold=0.5),
+                  replay_case],
     })
 
 

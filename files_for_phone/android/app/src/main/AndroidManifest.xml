@@ -1,6 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- M3 runs on recorded data with a simulated hand: no network or Bluetooth permissions yet. -->
+    <!-- Armband: UDP from the MindRove armband over its WiFi network (sockets need INTERNET). -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Hand: BLE connection to the Haifa3D hand. Scanning is only a fallback to find it by address. -->
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation" />
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
+
     <application
         android:label="Project Yad"
         android:theme="@android:style/Theme.Material.NoActionBar">

@@ -129,8 +129,8 @@ The phone first runs **Pi-compatible mode**: the same decisions every ~1.2 s, to
 | M0 ✅ | `files_for_phone/tools/` environment, `export_head.py`, `make_golden.py`; parity of the JSON head vs sklearn. Done 2026-11-14: 4 heads exported with 100% prediction agreement; `tomer_with_finger` was refused because its model and recording don't match | No |
 | M1 ✅ | `export_cnn.py`; TFLite vs Keras parity; end-to-end accuracy on recordings matches the Python pipeline. Done 2026-11-14: a 19.3 MB float32 model using built-in ops only (no Flex). Over 20,250 windows: feature error ≤1.1e-6, 0 changed predictions | No |
 | M2 ✅ | `android/core` + unit tests passing on the golden vectors (JVM, on the PC). Done 2026-11-14: 12 tests pass; filters bit-identical, head within 6.6e-11, decisions identical; the tests were checked with planted bugs | No |
-| M3 🔨 | App skeleton: replay source + simulated hand, inference screen, overrides, sliders. Built 2026-11-14: replay of 3 users, STOP, manual buttons, sliders + Pi preset, stats, CNN benchmark, and an on-device parity check at startup. Installed on the S23 FE: the on-device check passed (CNN rel. error 8.4e-7, probabilities ±4.3e-10, 10/10 windows). Benchmark pending | Phone only (install APK) |
-| M4 | **Hardware session A (~15 min, no recording):** armband streaming + units check at rest; hand BLE: manual buttons and e-stop | Phone + armband + hand |
+| M3 ✅ | App skeleton: replay source + simulated hand, inference screen, overrides, sliders. Built 2026-11-14: replay of 3 users, STOP, manual buttons, sliders + Pi preset, stats, CNN benchmark, and an on-device parity check at startup. Installed on the S23 FE: the on-device check passed (CNN rel. error 8.4e-7, probabilities ±4.3e-10, 10/10 windows). CNN ~113 ms/window on one core (1–4 threads the same); replay 99.6% of windows correct | Phone only (install APK) |
+| M4 🔨 | **Hardware session A (~15 min, no recording):** armband streaming + units check at rest; hand BLE: manual buttons and e-stop . Code built 2026-11-14 (APK 0.4.0-m4): own UDP receiver, Haifa3D BLE hand, units check, engine benchmark; awaiting session A | Phone + armband + hand |
 | M5 | Live inference in Pi-compatible mode. **Session B (~15 min):** perform each gesture for a few seconds, and compare with the Pi if available | Phone + armband + hand |
 | M6 | Sliding-window latency mode (offline-tuned first) | Brief check in a later session |
 | M7 | Profiles, model registry, recording + export, correction logging | Phone (+ armband for recording) |
@@ -158,3 +158,12 @@ Resolved:
 | CNN too slow on the phone | Measure in M3 with replay. Options: XNNPACK/GPU delegate, fp16 (only if parity holds) |
 | Phone on armband WiFi (no internet): Android may route traffic to mobile data | Bind the app to the WiFi network; the UDP listener on port 4210 isn't affected; documented in the setup screen |
 | Wrong commands to the hand during development | `SimulatedHand` by default; the real hand needs an explicit opt-in; e-stop always available |
+
+## 12. Security notes (M4)
+
+- **Armband socket.** The MindRove SDK's `ServerManager` listens on UDP 4210 on *all* interfaces, mobile data included. Fake EMG there could move the hand. So the app owns the socket and uses the SDK only to decode packets:
+  - It binds to the phone's WiFi address by default.
+  - Binding to all addresses (to receive broadcasts) is an explicit switch in the app.
+  - Either way, the socket is tied to the WiFi network. It accepts only packets from the WiFi subnet, and locks onto the first device that streams. Rejected packets are counted on screen.
+- **Armband WiFi password.** The armband's network uses MindRove's default password (`#mindrove`, also hard-coded in `files_for_pi/wifi_connect_pi.py`). Anyone nearby who knows it can join that network. If MindRove allows changing it, do so. Then keep the new password out of git, e.g. in a file the Pi reads.
+- **Hand BLE.** The Haifa3D hand accepts commands from any BLE device without pairing. This is a property of the hand, so the app can't fix it. In the app, the real hand is off by default, and STOP always blocks the classifier.
