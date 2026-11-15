@@ -31,6 +31,17 @@ class TrainingSet(val features: List<FloatArray>, val labels: IntArray, val weig
     /** Same data with every weight multiplied by [factor]. */
     fun weighted(factor: Double) = TrainingSet(features, labels, DoubleArray(size) { weights[it] * factor })
 
+    /** The format [parse] reads (takes all 0), e.g. to cache a recording's head inputs. */
+    fun toBytes(rmsOver: RmsOver): ByteArray {
+        val d = features.firstOrNull()?.size ?: 0
+        val b = ByteBuffer.allocate(20 + 8 * size + 4 * size * d).order(ByteOrder.LITTLE_ENDIAN)
+        b.put(MAGIC).putInt(1).putInt(size).putInt(d).putInt(rmsOver.ordinal)
+        labels.forEach { b.putInt(it) }
+        repeat(size) { b.putInt(0) }
+        features.forEach { f -> f.forEach { b.putFloat(it) } }
+        return b.array()
+    }
+
     companion object {
         private val MAGIC = "YADT".toByteArray(Charsets.US_ASCII)
 

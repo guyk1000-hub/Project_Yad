@@ -1,4 +1,4 @@
-# Handoff — Project Yad phone app (state on 2026-11-15)
+# Handoff — Project Yad phone app (state on 2026-11-15, evening)
 
 ## What this is
 
@@ -29,30 +29,30 @@ Owners: Guy Katabi and Tomer Ohayon. Repo: github.com/guyk1000-hub/Project_Yad, 
 
 ## State
 
-- **Done (on GitHub up to `e775873`):** M0–M4. The phone reproduces the Pi pipeline exactly
-  (golden tests), runs live from the armband (own WUA2 packet decoder), drives the real hand
-  over BLE (off by default), STOP + manual overrides, sliders, benchmark, guided 35 s check.
-  `fine_tune.py` now reports held-out-take accuracy (user-approved).
-- **Committed locally, NOT pushed:** `d17884e` M5, per-session calibration on the phone
-  (record 10 s/gesture → retrain head on the phone with the original recording → saved as a
-  model version). Built as `~/ProjectYad-m5.apk` (0.5.0-m5). **Not yet tested on hardware.**
-- **Key finding:** models don't transfer across sessions (~47% cross-session, live 46%/74%);
-  old data + a few seconds of the current session restores 95–99% offline. The Kotlin trainer
-  matches sklearn offline (guy 83% vs 77%, tomer 96% vs 99%).
+- **On GitHub:** M0–M5 (up to `6e12775`).
+- **Session B (15 Nov) done for Tomer** (see REPORT_NOTES.md E-calib, E-calib2): calibrated
+  models reached 90–94% on separate guided checks (from 74%). On the PC, the old PC recording made
+  every variant worse, and training only on the two phone recordings was best (99 / 91 / 98%).
+  LEFT ↔ RIGHT is the weakest pair. Guy was skipped for now (the user's call).
+- **Committed locally, not pushed:** M5b (APK `~/ProjectYad-0.6.0.apk`, 0.6.0-m5b). Record (3 × 10 s
+  per gesture) or quick calibration (1 take), then train from zero on all of the user's phone
+  recordings; import/delete recordings; phone models `<user>-phone@yyyyMMdd_HHmmss`, never
+  overwritten; every phone model also exported to Downloads as `yad_model_<name>.json`.
+  `analyze_check.py` reads those (`--head`) and can redo a calibration on the PC (`--calib`).
+  **Not yet tested on hardware.**
+- Session files: `tools/out/checks/` (git-ignored: personal data).
 
 ## Next steps
 
-1. **Hardware session B** (user, ~10 min/person): install `ProjectYad-m5.apk`; armband on (only
-   the phone on its WiFi; power-cycle if it streams elsewhere); pick user model → Armband (live)
-   → Start armband (500 samples/s) → **Calibrate** (10 s/gesture, then 3–5 min training) →
-   Start armband again → **guided check** → try live with Real hand off, then on.
-   Ask for: the check screenshot, `Downloads/yad_calib_*.bin`, `yad_check_*.bin`, and how long training took.
-2. Analyse with `tools/analyze_check.py` (runs the data through the Pi code, compares with the
-   phone). If Guy is still weak: longer calibration, more iterations, smaller hop.
-3. Then, in rough priority: multi-session training (keep calibration data per user and train on
-   all sessions), make the app usable (profiles, simple main screen, settings out of the way),
-   lower latency (sliding window; the 94.9 ms no-XNNPACK engine as default), learning from
-   "that was wrong" corrections.
+1. **Hardware session C (Tomer):** install 0.6.0. Import the two `yad_calib_tomer_20261115_*.bin`
+   (→ `tomer-phone@…`), Start armband, guided check. Then **Record** (3 takes), guided check, wait
+   ~5 min, guided check again. Ask for: screenshots, the training-time message, `rec_tomer_*.bin`,
+   `yad_check_tomer-phone@*.bin`, `yad_model_tomer-phone@*.json`.
+2. Analyse (`analyze_check.py --head …`). If LEFT stays weak: more LEFT data, or check the LEFT/RIGHT gestures themselves.
+3. Then, in rough priority: new users without a bundled PC model (profiles), a simpler main
+   screen with settings out of the way, lower latency (sliding window; the 94.9 ms no-XNNPACK
+   engine as default), learning from "that was wrong" corrections. The bundled `train_*.bin`
+   (18 MB in the APK) are no longer used by the app.
 
 ## Environment (this dev machine)
 

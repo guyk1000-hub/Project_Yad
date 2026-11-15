@@ -16,6 +16,14 @@ object Calibration {
     const val NEW_SHARE = 0.37
     const val ITERATIONS = 300
 
+    /**
+     * Training from the phone's own recordings only (no PC recording), on all of them: on the
+     * 15 Nov checks this beat old + new data (REPORT_NOTES.md, E-calib2), and hop 50 did as well as 25
+     * with half the windows.
+     */
+    const val RECORDING_HOP = 50
+    const val RECORDING_TAKES = 3
+
     /** Filtered windows with labels. The filters run over the whole stream, getting-ready part included. */
     fun windows(raw: List<DoubleArray>, labels: List<Int>, sampleRate: Int = 500, length: Int = 100,
                 hop: Int = HOP): List<Pair<EmgWindow, Int>> {

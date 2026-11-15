@@ -135,6 +135,74 @@ Adapt on the first 3 s of each gesture from the check, test on the last 3 s:
   More data per gesture matters most (Guy); real calibration records 4× more per gesture than
   this test. Kotlin trainer: 33 s for 300 iterations on the dev PC.
 
+### E-calib: session B (15 Nov 2026), calibrated on the phone, then guided check
+
+Calibration: 10 s per gesture, retrained on the phone (old recording + new windows, 37% weight),
+~5 min on the S23 FE. Then a separate 35 s guided check (a new hold, not the calibration data).
+
+| User / model | Accuracy | REST | CLOSE | OPEN | RIGHT | LEFT |
+|---|---|---|---|---|---|---|
+| Tomer / tomer (session A, no calibration) | 74% | 96 | 33 | 54 | 88 | 100 |
+| **Tomer / tomer@20261115_1717 (calibrated)** | **94%** (113/120) | 95 | 100 | 100 | 95 | 75 (else RIGHT ×5) |
+| Tomer, 2nd check later the same session (from the screenshot, file not analysed) | ~63% | 75 | 95 | 100 | 45 | 0 |
+
+Same check (17:18) re-run on the PC with other training data (sklearn, phone recipe). The
+calibration is 50 s of new data = 885 windows (177 per gesture):
+
+| Trained on | Check accuracy | REST | CLOSE | OPEN | RIGHT | LEFT |
+|---|---|---|---|---|---|---|
+| Old recording only (bundled `tomer`) | 55% | 100 | 0 | 0 | 75 | 100 |
+| Old + calibration, 300 it (= the phone's recipe; phone: 93%) | 94% | 100 | 100 | 96 | 92 | 83 |
+| Old + calibration, 2000 it | 95% | 100 | 88 | 96 | 96 | 96 |
+| **Calibration only** (from scratch, 210 it) | **98%** | 100 | 100 | 100 | 92 | 100 |
+
+With 10 s per gesture, today's data alone beats old + today (with 3 s it was 86% vs 99%, E-adapt).
+The phone's own trainer matches sklearn (93% vs 94%).
+
+
+### E-calib2: second calibration (17:49) and checks across 50 min, Tomer, 15 Nov
+
+On the phone (model `tomer@20261115_1758` = old + 17:49 calibration): checks at 18:02 **90%**
+(LEFT 50%) and 18:05 **93%**. The exported model rerun on the PC gives the same probabilities
+(max |Δp| 6e-6): the phone's trainer and inference are right.
+
+All variants (sklearn, 300 it, phone recipe), each scored on the three checks (all / LEFT):
+
+| Trained on | check 17:18 | check 18:02 | check 18:05 |
+|---|---|---|---|
+| Old recording only | 55% / 100 | 49% / 17 | 52% / 21 |
+| Old + calib 17:12 | 94% / 83 | 61% / 25 | 55% / 8 |
+| Calib 17:12 only | 98% / 100 | 68% / 38 | 74% / 71 |
+| Old + calib 17:49 | 78% / 96 | 88% / 42 | 95% / 79 |
+| Calib 17:49 only | 80% / 100 | 92% / 58 | 99% / 100 |
+| **Calib 17:12 + 17:49 only** | **99% / 100** | **91% / 54** | **98% / 92** |
+| Old + both calibs | 97% / 88 | 89% / 54 | 93% / 71 |
+
+Findings:
+1. The old PC recording makes every variant worse: drop it, train on phone recordings.
+2. Even within one session, a model from one recording degrades 30–50 min later (98% → 68–74%).
+   Two recordings together hold up across all checks: train on all recordings of a person.
+3. LEFT at 18:02 fails for every model (≤ 58%): that hold differed, not the model. LEFT vs RIGHT
+   is the weakest pair.
+
+### M5b: record and train from zero on the phone (0.6.0, 15 Nov)
+
+- **Record** (3 takes × 10 s per gesture, 5 s break between takes, ~3 min) or **Quick
+  calibration** (1 take, ~1 min). Each recording is kept on the phone (`files/recordings/<user>/`,
+  plus a copy in Downloads), and its head inputs are cached so that retraining doesn't rerun the CNN.
+- After every recording, the phone trains the user's model **from zero on all their phone
+  recordings** (no PC recording; windows every 50 samples; 300 L-BFGS iterations). Before
+  retraining, it reports how the previous phone model did on the new recording, which is data
+  that model never saw: an honest cross-session number.
+- Older calibration files can be imported from Downloads. A bad recording can be deleted and the
+  model retrained.
+- Names never collide. `tomer`, `guy` are the bundled PC models (read-only), `tomer@…` the old
+  calibrated versions, and `tomer-phone@yyyyMMdd_HHmmss` the phone-trained ones. Saving refuses
+  to overwrite.
+- Verified offline before the hardware session. The Kotlin windowing on the real 15 Nov files
+  equals the Python windowing (445 windows each, same labels). Kotlin training from zero on both
+  calibrations scores **97 / 93 / 97%** on the three checks (sklearn: 99 / 92 / 98%), in 19 s on the PC.
+
 ## Decisions log
 
 | Date | Decision | Why |
@@ -146,6 +214,8 @@ Adapt on the first 3 s of each gesture from the check, test on the last 3 s:
 | 2026-11-15 | Pi dropped from the project | Phone does everything the Pi did |
 | 2026-11-15 | Next: per-session calibration on the phone (M5) | E-adapt results |
 | 2026-11-15 | fine_tune.py reports held-out-take accuracy | Honest number |
+| 2026-11-15 | Phone exports each calibrated model (JSON) | So checks with it can be re-run on the PC |
+| 2026-11-15 | Record and train from zero on the phone, on all of a person's phone recordings; old PC data dropped | E-calib2 (user's idea) |
 | 2026-11-15 | Train on the phone (own L-BFGS), not on the PC | No PC round trip each session; matches sklearn offline |
 
 ## Ethics notes (to expand)

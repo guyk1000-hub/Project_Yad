@@ -10,6 +10,11 @@ Keras CNN, sklearn head) and answers:
 Usage (from the repo root):
     files_for_phone/tools/.venv/bin/python files_for_phone/tools/analyze_check.py ~/yad_check_tomer_*.bin
     files_for_phone/tools/.venv/bin/python files_for_phone/tools/analyze_check.py --selftest FILE   # format only
+
+A check made with a model calibrated on the phone (name "<user>@<time>") needs that model's
+Downloads/yad_model_<user>@<time>.json next to the check file (or --head). With --calib
+Downloads/yad_calib_<user>_<time>.bin it also retrains the same way on the PC with sklearn and
+scores that on the check: is a weak result the phone's trainer or the data?
 """
 import argparse
 import json
@@ -50,6 +55,87 @@ def read_check(path: str) -> dict:
     return {"header": header, "labels": labels, "raw": raw, "windows": windows}
 
 
+class JsonHead:
+    """A head exported as JSON (export_head.py, or calibrated on the phone): scaler + MLP, in numpy."""
+
+    def __init__(self, path: str):
+        with open(path) as f:
+            d = json.load(f)
+        self.mean, self.scale = np.array(d["scaler"]["mean"]), np.array(d["scaler"]["scale"])
+        self.layers = [(np.array(l["weights"]), np.array(l["bias"])) for l in d["layers"]]
+        self.act = {"tanh": np.tanh, "relu": lambda x: np.maximum(x, 0), "identity": lambda x: x,
+                    "logistic": lambda x: 1 / (1 + np.exp(-x))}[d["hidden_activation"]]
+        self.classes_ = np.array(d["classes"])
+
+    def predict_proba(self, F: np.ndarray) -> np.ndarray:
+        a = (F - self.mean) / self.scale
+        for i, (W, b) in enumerate(self.layers):
+            a = a @ W + b
+            if i < len(self.layers) - 1:
+                a = self.act(a)
+        e = np.exp(a - a.max(1, keepdims=True))
+        return e / e.sum(1, keepdims=True)
+
+
+class SklearnHead:
+    """A head from the repo's pickles, with the same interface as JsonHead."""
+
+    def __init__(self, scaler, mlp):
+        self.scaler, self.mlp, self.classes_ = scaler, mlp, mlp.classes_
+
+    def predict_proba(self, F: np.ndarray) -> np.ndarray:
+        return self.mlp.predict_proba(self.scaler.transform(F))
+
+
+def read_train(path: str):
+    """Head inputs + labels from a file written by export_train_features.py."""
+    with open(path, "rb") as f:
+        data = f.read()
+    assert data[:4] == b"YADT", path
+    _, n, d, _ = struct.unpack_from("<4i", data, 4)
+    y = np.frombuffer(data, "<i4", n, 20).astype(int)
+    F = np.frombuffer(data, "<f4", n * d, 20 + 8 * n).reshape(n, d).astype(np.float64)
+    return F, y
+
+
+# The phone's calibration recipe (core/Calibration.kt).
+CALIB_HOP, CALIB_NEW_SHARE, CALIB_ITERATIONS = 25, 0.37, 300
+
+
+def calibration_windows(c: dict) -> tuple:
+    """Same windows as Calibration.windows: every HOP samples, inside one gesture, >= 1 s into it."""
+    labels, L, sr = c["labels"], c["header"]["window_length"], c["header"]["sampling_rate"]
+    filtered = pi_filter(c["raw"])
+    phase_start = np.zeros(len(labels), dtype=int)
+    for i in range(1, len(labels)):
+        phase_start[i] = i if labels[i] != labels[i - 1] else phase_start[i - 1]
+    starts = [s for s in range(0, len(labels) - L + 1, CALIB_HOP)
+              if labels[s] >= 0 and labels[s + L - 1] == labels[s] and s >= phase_start[s] + sr]
+    X = np.stack([filtered[s:s + L].T for s in starts])[..., None].astype(np.float32)
+    return X, labels[starts]
+
+
+def retrain_on_pc(calib_path: str, rms_over: str, F_check: np.ndarray, mask: np.ndarray, truth: np.ndarray):
+    """The phone's calibration, redone with sklearn (300 iterations as on the phone, and 2000)."""
+    from sklearn.neural_network import MLPClassifier
+    from sklearn.preprocessing import StandardScaler
+    c = read_check(calib_path)
+    user = c["header"]["model"].split("@")[0]
+    Xc, yc = calibration_windows(c)
+    Fc = yad_ref.head_inputs(Xc, yad_ref.cnn_features(Xc), rms_over)
+    Fo, yo = read_train(os.path.join(yad_ref.PHONE_MODELS_DIR, f"train_{user}.bin"))
+    F, y = np.vstack([Fo, Fc]), np.concatenate([yo, yc])
+    w = np.concatenate([np.ones(len(yo)), np.full(len(yc), CALIB_NEW_SHARE / (1 - CALIB_NEW_SHARE) * len(yo) / len(yc))])
+    print(f"\nretrained on the PC (sklearn): {len(yo)} old + {len(yc)} calibration windows "
+          f"({os.path.basename(calib_path)}, per gesture {np.bincount(yc, minlength=5).tolist()})")
+    sc = StandardScaler().fit(F, sample_weight=w)
+    for iters in (CALIB_ITERATIONS, 2000):
+        m = MLPClassifier(hidden_layer_sizes=(32, 16), max_iter=iters, random_state=42, activation="tanh",
+                          solver="lbfgs", alpha=0.01).fit(sc.transform(F), y, sample_weight=w)
+        pred = m.classes_[m.predict_proba(sc.transform(F_check)).argmax(1)][mask]
+        print(f"  {m.n_iter_:5d} iterations:        {per_gesture(pred, truth)}", flush=True)
+
+
 def pi_filter(raw: np.ndarray) -> np.ndarray:
     """The Pi's filter chain over the whole stream. The filters are per-sample IIR with state, so
     one pass over everything equals the Pi's window-by-window processing."""
@@ -88,6 +174,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("files", nargs="+")
     ap.add_argument("--selftest", action="store_true", help="only check that the file parses")
+    ap.add_argument("--head", help="JSON of a model calibrated on the phone (default: yad_model_<model>.json beside the check)")
+    ap.add_argument("--calib", help="the calibration file (yad_calib_*.bin): also retrain on the PC and compare")
     args = ap.parse_args()
 
     for path in args.files:
@@ -107,13 +195,23 @@ def main():
         cnn = yad_ref.cnn_features(X)
 
         # 1 + 2: the phone's model through the Pi code.
-        scaler, mlp = yad_ref.load_head(h["model"])
-        p = mlp.predict_proba(scaler.transform(yad_ref.head_inputs(X, cnn, h["scalar_rms_over"])))
-        settled = np.arange(len(w)) >= 20   # skip the first 4 s: the Pi code's filters start cold here
-        diff = np.abs(p - w["probs"])[settled].max()
-        print(f"Pi code, same model:      {per_gesture(mlp.classes_[p.argmax(1)][mask], truth)}")
-        print(f"phone vs Pi code: max |Δp| = {diff:.2e} after the first 4 s "
-              f"({'same computation' if diff < 1e-3 else 'DIFFERENT — phone bug, look closer'})")
+        F = yad_ref.head_inputs(X, cnn, h["scalar_rms_over"])
+        if "@" in h["model"]:   # calibrated on the phone: its weights exist only in the exported JSON
+            head_path = args.head or os.path.join(os.path.dirname(path), f"yad_model_{h['model']}.json")
+            head = JsonHead(head_path) if os.path.exists(head_path) else None
+            if head is None:
+                print(f"(no {os.path.basename(head_path)}: can't rerun the phone's model; pass --head)")
+        else:
+            head = SklearnHead(*yad_ref.load_head(h["model"]))
+        if head is not None:
+            p = head.predict_proba(F)
+            settled = np.arange(len(w)) >= 20   # skip the first 4 s: the Pi code's filters start cold here
+            diff = np.abs(p - w["probs"])[settled].max()
+            print(f"Pi code, same model:      {per_gesture(head.classes_[p.argmax(1)][mask], truth)}")
+            print(f"phone vs Pi code: max |Δp| = {diff:.2e} after the first 4 s "
+                  f"({'same computation' if diff < 1e-3 else 'DIFFERENT — phone bug, look closer'})")
+        if args.calib:
+            retrain_on_pc(args.calib, h["scalar_rms_over"], F, mask, truth)
 
         # 3: other models, and the armband rotated or mirrored. CNN features once per channel order.
         print("\nother models / channel orders (Pi code):")

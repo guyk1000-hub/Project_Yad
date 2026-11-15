@@ -45,6 +45,8 @@ import java.util.concurrent.Executors
 
 enum class Source { REPLAY, ARMBAND }
 
+data class RecordingInfo(val fileName: String, val seconds: Int)
+
 data class LogEntry(val time: String, val source: String, val command: HandCommand, val outcome: String)
 
 data class UiState(
@@ -90,7 +92,8 @@ data class UiState(
     val checkStep: String? = null,
     val checkResults: List<String> = emptyList(),
     val checkStatus: String? = null,
-    val calibrationStatus: String? = null,
+    val trainingStatus: String? = null,
+    val recordings: List<RecordingInfo> = emptyList(),
 ) {
     val decisionEveryMs: Int get() = groupSize * WINDOW_MS
 
@@ -212,6 +215,7 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
         head = h
         replay = r
         resetSignalPath()
+        refreshRecordings(catalog.userOf(name))
         _state.update {
             it.copy(
                 model = name,
@@ -399,15 +403,18 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
         return null
     }
 
-    /** Worker thread only: true while the running GuidedCheck is a calibration recording. */
-    private var calibrating = false
+    /** Worker thread only: number of takes while the running GuidedCheck is a recording to train on, else 0. */
+    private var recordingTakes = 0
 
-    fun startCheck() = startGuided(calibration = false)
+    fun startCheck() = startGuided(takes = 0)
 
-    /** Records ~10 s of each gesture, then retrains the current user's model with it (see Calibration). */
-    fun startCalibration() = startGuided(calibration = true)
+    /**
+     * Records [takes] × 10 s of each gesture into the user's phone recordings, then trains the
+     * user's model from zero on all of them (Calibration.RECORDING_*). 1 take = a quick calibration.
+     */
+    fun startRecording(takes: Int) = startGuided(takes)
 
-    private fun startGuided(calibration: Boolean) {
+    private fun startGuided(takes: Int) {
         val s = _state.value
         if (s.source != Source.ARMBAND || !s.running) {
             _state.update { it.copy(checkStatus = "Start the armband first (Signal: Armband, then Start armband).") }
@@ -415,10 +422,11 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
         }
         viewModelScope.launch(worker) {
             val h = head ?: return@launch
-            calibrating = calibration
+            recordingTakes = takes
             check = GuidedCheck(s.model ?: "?", h.rmsOver.jsonName, h.classes,
-                phaseSeconds = if (calibration) Calibration.PHASE_SECONDS else GuidedCheck.PHASE_SECONDS)
-            _state.update { it.copy(checkResults = emptyList(), checkStatus = null, calibrationStatus = null) }
+                phaseSeconds = if (takes > 0) Calibration.PHASE_SECONDS else GuidedCheck.PHASE_SECONDS,
+                takes = maxOf(takes, 1))
+            _state.update { it.copy(checkResults = emptyList(), checkStatus = null, trainingStatus = null) }
         }
     }
 
@@ -436,11 +444,16 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         check = null
-        if (calibrating) {
-            val saved = saveToDownloads("yad_calib_${catalog.userOf(c.model)}_${timestamp()}.bin", c.toBytes())
-            _state.update { it.copy(checkPrompt = null, checkStep = null, checkStatus = saved, calibrationStatus = "Recording done. Preparing…") }
+        if (recordingTakes > 0) {
+            val user = catalog.userOf(c.model)
+            val bytes = c.toBytes()
+            val fileName = "rec_${user}_${timestamp()}.bin"
+            catalog.saveRecording(user, fileName, bytes)
+            val saved = saveToDownloads(fileName, bytes)
+            _state.update { it.copy(checkPrompt = null, checkStep = null, checkStatus = saved, trainingStatus = "Recording done. Preparing…") }
+            refreshRecordings(user)
             stopRun()
-            viewModelScope.launch(worker) { trainCalibrated(c) }
+            viewModelScope.launch(worker) { trainFromRecordings(user, afterNewRecording = true) }
             return
         }
         val results = c.results()
@@ -448,44 +461,126 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(checkPrompt = null, checkStep = null, checkResults = results, checkStatus = saved) }
     }
 
-    /** Worker thread: CNN features for the calibration windows, retrain with the old recording, save and select. */
-    private fun trainCalibrated(c: GuidedCheck) {
+    /** Retrains the current user's model on their phone recordings (no armband needed). */
+    fun retrain() {
+        val user = catalog.userOf(_state.value.model ?: return)
+        stopRun()
+        viewModelScope.launch(worker) { trainFromRecordings(user, afterNewRecording = false) }
+    }
+
+    private fun trainingStatus(msg: String) = _state.update { it.copy(trainingStatus = msg) }
+
+    /**
+     * Worker thread: trains [user]'s model from zero on all their phone recordings (not the PC
+     * recording), saves it as a new "<user>-phone@<time>" version and selects it.
+     */
+    private fun trainFromRecordings(user: String, afterNewRecording: Boolean) {
         val fx = extractor ?: return
-        val base = head ?: return
-        val user = catalog.userOf(c.model)
-        fun status(msg: String) = _state.update { it.copy(calibrationStatus = msg) }
         try {
-            val windows = Calibration.windows(c.raw, c.rawLabelsList)
-            val features = windows.mapIndexed { i, (w, _) ->
-                if (i % 20 == 0) status("Computing features: ${i * 100 / windows.size}%")
-                ScalarFeatures.headInput(fx.extract(w), w, base.rmsOver)
+            val base = catalog.head(user)      // same features and classes as the user's bundled model
+            val files = catalog.recordings(user)
+            if (files.isEmpty()) { trainingStatus("No recordings for $user yet: tap Record."); return }
+            val sets = files.mapIndexed { k, f ->
+                recordingFeatures(f, base.rmsOver, fx) { pct -> trainingStatus("Computing features, recording ${k + 1}/${files.size}: $pct%") }
             }
-            val fresh = TrainingSet(features, windows.map { it.second }.toIntArray())
-            val old = catalog.trainingData(user)?.first
-            val data = if (old == null) fresh else old + fresh.weighted(Calibration.newWeight(old.size, fresh.size))
+            // An honest number, before retraining: the previous phone model on data it has never seen.
+            val previous = catalog.latestPhoneTrained(user)
+            val before = if (afterNewRecording && previous != null && files.size > 1)
+                "${displayName(previous)} scored ${accuracyPercent(catalog.head(previous), sets.last())}% on this new recording. " else ""
+            val data = sets.reduce { a, b -> a + b }
             val t0 = System.nanoTime()
             val result = MlpTrainer(maxIterations = Calibration.ITERATIONS).train(data) { iter, _ ->
-                if (iter % 5 == 0) status("Training: ${iter * 100 / Calibration.ITERATIONS}%")
+                if (iter % 5 == 0) trainingStatus("Training on ${data.size} windows from ${files.size} recordings: ${iter * 100 / Calibration.ITERATIONS}%")
                 true
             }
             val secs = (System.nanoTime() - t0) / 1_000_000_000
-            val name = "$user@${timestamp().take(13)}"     // yyyyMMdd_HHmm
-            val note = "calibrated on the phone: ${fresh.size} new windows" +
-                (if (old == null) " only" else " + ${old.size} from the original recording") +
-                ", ${result.iterations} iterations"
-            catalog.saveCalibrated(name, result.toHeadJson(name, base.rmsOver, base.classNames, note))
+            val name = "$user${ModelCatalog.PHONE_SUFFIX}@${timestamp()}"
+            val note = "trained on the phone from zero: ${files.size} recordings (${files.joinToString { it.name }}), " +
+                "${data.size} windows, ${result.iterations} iterations"
+            val json = result.toHeadJson(name, base.rmsOver, base.classNames, note)
+            catalog.saveCalibrated(name, json)
+            // A copy for the PC: tools/analyze_check.py needs it to rerun checks made with this version.
+            saveToDownloads("yad_model_$name.json", json.toByteArray(Charsets.UTF_8))
             _state.update { it.copy(models = catalog.names) }
             loadModel(name)
-            status("✓ Saved ${displayName(name)}: ${fresh.size} new windows, trained in $secs s. " +
-                "Start the armband and run the guided check to see how well it works.")
+            trainingStatus("✓ Saved ${displayName(name)}: ${files.size} recordings, ${data.size} windows, trained in $secs s. " +
+                before + "Start the armband and run the guided check.")
         } catch (e: Exception) {
-            status("Calibration failed: ${e.message}")
+            trainingStatus("Training failed: ${e.message}")
         }
     }
 
-    /** Deletes a calibrated version and goes back to the newest remaining one for that user. */
+    /** Worker thread: a recording's training windows as head inputs, cached in a .feat file next to it. */
+    private fun recordingFeatures(f: java.io.File, rmsOver: yad.core.RmsOver, fx: TfliteFeatureExtractor, progress: (Int) -> Unit): TrainingSet {
+        val cache = java.io.File(f.path.removeSuffix(".bin") + ".feat")
+        if (cache.exists()) {
+            val (set, rms) = TrainingSet.parse(cache.readBytes())
+            if (rms == rmsOver) return set
+        }
+        val (raw, labels) = GuidedCheck.readSamples(f.readBytes())
+        val windows = Calibration.windows(raw, labels, hop = Calibration.RECORDING_HOP)
+        require(windows.isNotEmpty()) { "${f.name} has no gesture windows" }
+        val features = windows.mapIndexed { i, (w, _) ->
+            if (i % 20 == 0) progress(i * 100 / windows.size)
+            ScalarFeatures.headInput(fx.extract(w), w, rmsOver)
+        }
+        val set = TrainingSet(features, windows.map { it.second }.toIntArray())
+        cache.writeBytes(set.toBytes(rmsOver))
+        return set
+    }
+
+    private fun accuracyPercent(h: MlpHead, set: TrainingSet): Int {
+        val correct = set.features.indices.count { i ->
+            val p = h.predictProba(set.features[i])
+            h.classes[p.indices.maxBy { p[it] }] == set.labels[i]
+        }
+        return correct * 100 / set.size
+    }
+
+    /** Copies recordings the user picked (e.g. yad_calib_* / rec_* from Downloads) into the current user's recordings, then retrains. */
+    fun importRecordings(uris: List<android.net.Uri>) {
+        if (uris.isEmpty()) return
+        val user = catalog.userOf(_state.value.model ?: return)
+        stopRun()
+        viewModelScope.launch(worker) {
+            val resolver = getApplication<Application>().contentResolver
+            val notes = mutableListOf<String>()
+            var added = 0
+            for (uri in uris) {
+                val name = resolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
+                    ?.use { if (it.moveToFirst()) it.getString(0) else null } ?: "rec_${user}_${timestamp()}.bin"
+                try {
+                    val bytes = resolver.openInputStream(uri)!!.use { it.readBytes() }
+                    GuidedCheck.readSamples(bytes)     // a Yad recording at 500 samples/s, or this throws
+                    if (catalog.recordings(user).any { it.name == name }) notes += "$name: already imported"
+                    else { catalog.saveRecording(user, name, bytes); added++ }
+                } catch (e: Exception) {
+                    notes += "$name: ${e.message}"
+                }
+            }
+            refreshRecordings(user)
+            trainingStatus("Imported $added for $user. " + notes.joinToString("; "))
+            if (added > 0) trainFromRecordings(user, afterNewRecording = false)
+        }
+    }
+
+    fun deleteRecording(fileName: String) {
+        val user = catalog.userOf(_state.value.model ?: return)
+        viewModelScope.launch(worker) {
+            catalog.recordings(user).firstOrNull { it.name == fileName }?.let { catalog.deleteRecording(it) }
+            refreshRecordings(user)
+            trainingStatus("Deleted $fileName. Tap Retrain to update the model without it.")
+        }
+    }
+
+    private fun refreshRecordings(user: String) {
+        val list = catalog.recordings(user).map { f -> RecordingInfo(f.name, (f.length() / 65 / SAMPLE_RATE).toInt()) }
+        _state.update { it.copy(recordings = list) }
+    }
+
+    /** Deletes a phone-made version and goes back to the newest remaining one for that user. */
     fun deleteModel(name: String) {
-        if (!catalog.isCalibrated(name)) return
+        if (!catalog.isPhoneMade(name)) return
         stopRun()
         viewModelScope.launch(worker) {
             val user = catalog.userOf(name)

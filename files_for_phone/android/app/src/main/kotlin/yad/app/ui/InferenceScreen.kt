@@ -30,6 +30,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -53,6 +54,7 @@ import yad.app.PI_THRESHOLD
 import yad.app.Source
 import yad.app.UiState
 import yad.app.displayName
+import yad.core.Calibration
 import yad.core.HandCommand
 import kotlin.math.roundToInt
 
@@ -83,7 +85,7 @@ fun InferenceScreen(vm: InferenceViewModel) {
         ManualButtons(vm::manual)
         HandSection(s, vm::setRealHand)
         RunControls(s, onStart = vm::start, onStop = vm::stopRun, onRealTime = vm::setRealTime)
-        if (s.source == Source.ARMBAND) CheckSection(s, vm::startCheck, vm::startCalibration)
+        TrainSection(s, vm)
         if (s.source == Source.ARMBAND) ArmbandSection(s, vm::setAcceptBroadcast, vm::requestEegMode, vm::captureRawPackets, vm::diagnosticsText)
         Sensitivity(s, vm)
         Stats(s)
@@ -264,26 +266,46 @@ private fun ArmbandSection(
 }
 
 @Composable
-private fun CheckSection(s: UiState, onStart: () -> Unit, onCalibrate: () -> Unit) {
+private fun TrainSection(s: UiState, vm: InferenceViewModel) {
+    val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { vm.importRecordings(it) }
+    val live = s.source == Source.ARMBAND && s.running
+    val user = s.model?.substringBefore('@')?.removeSuffix("-phone") ?: "?"
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("Calibrate & check", style = MaterialTheme.typography.titleMedium)
+            Text("Record, train & check", style = MaterialTheme.typography.titleMedium)
             val prompt = s.checkPrompt
             if (prompt != null) {
                 Text(s.checkStep ?: "", style = MaterialTheme.typography.labelMedium)
                 Text(prompt, fontSize = 30.sp, fontWeight = FontWeight.Bold)
             } else {
-                Text("Calibrate (~1 min): hold each gesture for 10 s; the phone then retrains your model with it " +
-                    "(about 3–5 min on the phone) and saves it as a new version. Do this each time you put the armband on.",
+                if (!live) Text("Start the armband (Signal: Armband (live)) to record or check.", style = MaterialTheme.typography.bodySmall)
+                Text("Record: hold each gesture for 10 s, ${Calibration.RECORDING_TAKES} times (~3 min). Quick calibration: once (~1 min). " +
+                    "Afterwards the phone trains $user's model from zero on all of $user's recordings and saves it as a new version.",
                     style = MaterialTheme.typography.bodySmall)
-                Button(onClick = onCalibrate, enabled = s.running) { Text("Calibrate") }
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { vm.startRecording(Calibration.RECORDING_TAKES) }, enabled = live) { Text("Record") }
+                    OutlinedButton(onClick = { vm.startRecording(1) }, enabled = live) { Text("Quick calibration") }
+                }
                 Text("Guided check (~35 s): hold each gesture for 6 s and see how well each is recognised.",
                     style = MaterialTheme.typography.bodySmall)
-                OutlinedButton(onClick = onStart, enabled = s.running) { Text("Start guided check") }
+                OutlinedButton(onClick = vm::startCheck, enabled = live) { Text("Start guided check") }
             }
             s.checkResults.forEach { Text(it, fontFamily = FontFamily.Monospace, fontSize = 13.sp) }
             s.checkStatus?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-            s.calibrationStatus?.let { Text(it, fontWeight = FontWeight.Bold) }
+            s.trainingStatus?.let { Text(it, fontWeight = FontWeight.Bold) }
+
+            Text("$user's recordings on this phone: ${s.recordings.size} (${s.recordings.sumOf { it.seconds } / 60} min)",
+                style = MaterialTheme.typography.labelMedium)
+            s.recordings.forEach { r ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("${r.fileName}  ${r.seconds} s", Modifier.weight(1f), fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                    TextButton(onClick = { vm.deleteRecording(r.fileName) }, enabled = prompt == null) { Text("Delete") }
+                }
+            }
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { pick.launch(arrayOf("*/*")) }, enabled = prompt == null) { Text("Import recordings…") }
+                OutlinedButton(onClick = vm::retrain, enabled = prompt == null && s.recordings.isNotEmpty()) { Text("Retrain") }
+            }
         }
     }
 }
