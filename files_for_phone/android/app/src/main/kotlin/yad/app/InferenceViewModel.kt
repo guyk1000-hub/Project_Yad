@@ -25,7 +25,10 @@ import yad.core.ChannelLevels
 import yad.core.CommandGate
 import yad.core.DecisionPolicy
 import yad.core.EmgWindow
+import yad.core.Calibration
 import yad.core.FilterChain
+import yad.core.MlpTrainer
+import yad.core.TrainingSet
 import yad.core.GuidedCheck
 import yad.core.Gesture
 import yad.core.GroupAverageDecisionPolicy
@@ -87,6 +90,7 @@ data class UiState(
     val checkStep: String? = null,
     val checkResults: List<String> = emptyList(),
     val checkStatus: String? = null,
+    val calibrationStatus: String? = null,
 ) {
     val decisionEveryMs: Int get() = groupSize * WINDOW_MS
 
@@ -108,6 +112,14 @@ data class UiState(
 const val WINDOW_MS = 200            // 100 samples at 500 Hz
 const val SAMPLE_RATE = 500
 const val PI_THRESHOLD = 0.7
+
+/** "guy@20261115_1430" -> "guy · 15/11 14:30"; bundled names unchanged. */
+fun displayName(name: String): String {
+    val at = name.indexOf('@')
+    if (at < 0 || name.length < at + 14) return name
+    val t = name.substring(at + 1)
+    return "${name.substring(0, at)} · ${t.substring(6, 8)}/${t.substring(4, 6)} ${t.substring(9, 11)}:${t.substring(11, 13)}"
+}
 const val PI_GROUP_SIZE = 6
 private const val LOG_SIZE = 40
 private const val TIMING_WINDOW = 50
@@ -160,7 +172,7 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
                     val check = golden!!.run(extractor!!, catalog.head("tomer"))
                     _state.update { it.copy(selfTest = "On-device check ${if (check.passed) "PASSED" else "FAILED"}: ${check.summary}", selfTestPassed = check.passed) }
                 }
-                val first = if ("tomer" in names) "tomer" else names.firstOrNull()
+                val first = catalog.latestFor("tomer") ?: if ("tomer" in names) "tomer" else names.firstOrNull()
                 if (first == null) _state.update { it.copy(status = "No models bundled") } else loadModel(first)
             } catch (e: Exception) {
                 _state.update { it.copy(status = "Failed to load: ${e.message}") }
@@ -387,7 +399,15 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
         return null
     }
 
-    fun startCheck() {
+    /** Worker thread only: true while the running GuidedCheck is a calibration recording. */
+    private var calibrating = false
+
+    fun startCheck() = startGuided(calibration = false)
+
+    /** Records ~10 s of each gesture, then retrains the current user's model with it (see Calibration). */
+    fun startCalibration() = startGuided(calibration = true)
+
+    private fun startGuided(calibration: Boolean) {
         val s = _state.value
         if (s.source != Source.ARMBAND || !s.running) {
             _state.update { it.copy(checkStatus = "Start the armband first (Signal: Armband, then Start armband).") }
@@ -395,8 +415,10 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
         }
         viewModelScope.launch(worker) {
             val h = head ?: return@launch
-            check = GuidedCheck(s.model ?: "?", h.rmsOver.jsonName, h.classes)
-            _state.update { it.copy(checkResults = emptyList(), checkStatus = null) }
+            calibrating = calibration
+            check = GuidedCheck(s.model ?: "?", h.rmsOver.jsonName, h.classes,
+                phaseSeconds = if (calibration) Calibration.PHASE_SECONDS else GuidedCheck.PHASE_SECONDS)
+            _state.update { it.copy(checkResults = emptyList(), checkStatus = null, calibrationStatus = null) }
         }
     }
 
@@ -414,9 +436,63 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         check = null
+        if (calibrating) {
+            val saved = saveToDownloads("yad_calib_${catalog.userOf(c.model)}_${timestamp()}.bin", c.toBytes())
+            _state.update { it.copy(checkPrompt = null, checkStep = null, checkStatus = saved, calibrationStatus = "Recording done. Preparing…") }
+            stopRun()
+            viewModelScope.launch(worker) { trainCalibrated(c) }
+            return
+        }
         val results = c.results()
         val saved = saveToDownloads("yad_check_${c.model}_${timestamp()}.bin", c.toBytes())
         _state.update { it.copy(checkPrompt = null, checkStep = null, checkResults = results, checkStatus = saved) }
+    }
+
+    /** Worker thread: CNN features for the calibration windows, retrain with the old recording, save and select. */
+    private fun trainCalibrated(c: GuidedCheck) {
+        val fx = extractor ?: return
+        val base = head ?: return
+        val user = catalog.userOf(c.model)
+        fun status(msg: String) = _state.update { it.copy(calibrationStatus = msg) }
+        try {
+            val windows = Calibration.windows(c.raw, c.rawLabelsList)
+            val features = windows.mapIndexed { i, (w, _) ->
+                if (i % 20 == 0) status("Computing features: ${i * 100 / windows.size}%")
+                ScalarFeatures.headInput(fx.extract(w), w, base.rmsOver)
+            }
+            val fresh = TrainingSet(features, windows.map { it.second }.toIntArray())
+            val old = catalog.trainingData(user)?.first
+            val data = if (old == null) fresh else old + fresh.weighted(Calibration.newWeight(old.size, fresh.size))
+            val t0 = System.nanoTime()
+            val result = MlpTrainer(maxIterations = Calibration.ITERATIONS).train(data) { iter, _ ->
+                if (iter % 5 == 0) status("Training: ${iter * 100 / Calibration.ITERATIONS}%")
+                true
+            }
+            val secs = (System.nanoTime() - t0) / 1_000_000_000
+            val name = "$user@${timestamp().take(13)}"     // yyyyMMdd_HHmm
+            val note = "calibrated on the phone: ${fresh.size} new windows" +
+                (if (old == null) " only" else " + ${old.size} from the original recording") +
+                ", ${result.iterations} iterations"
+            catalog.saveCalibrated(name, result.toHeadJson(name, base.rmsOver, base.classNames, note))
+            _state.update { it.copy(models = catalog.names) }
+            loadModel(name)
+            status("✓ Saved ${displayName(name)}: ${fresh.size} new windows, trained in $secs s. " +
+                "Start the armband and run the guided check to see how well it works.")
+        } catch (e: Exception) {
+            status("Calibration failed: ${e.message}")
+        }
+    }
+
+    /** Deletes a calibrated version and goes back to the newest remaining one for that user. */
+    fun deleteModel(name: String) {
+        if (!catalog.isCalibrated(name)) return
+        stopRun()
+        viewModelScope.launch(worker) {
+            val user = catalog.userOf(name)
+            catalog.delete(name)
+            _state.update { it.copy(models = catalog.names) }
+            loadModel(catalog.latestFor(user) ?: user)
+        }
     }
 
     // ---- hand ----------------------------------------------------------------------------

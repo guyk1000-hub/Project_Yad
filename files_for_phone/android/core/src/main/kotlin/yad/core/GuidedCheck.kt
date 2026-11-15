@@ -10,11 +10,17 @@ import java.nio.ByteOrder
  * for each window, so the same data can be run through the Pi's Python code on a PC
  * (files_for_phone/tools/analyze_check.py). Pure Kotlin, so the file format is tested on the PC.
  */
-class GuidedCheck(val model: String, val rmsOver: String, val classes: IntArray, val sampleRate: Int = 500) {
+class GuidedCheck(
+    val model: String,
+    val rmsOver: String,
+    val classes: IntArray,
+    val sampleRate: Int = 500,
+    val phaseSeconds: Int = PHASE_SECONDS,
+) {
     data class Phase(val label: Int, val title: String, val seconds: Int)
 
     val phases: List<Phase> = listOf(Phase(-1, "Get ready: relax your arm", READY_SECONDS)) +
-        GESTURES.map { Phase(it.id, it.name, PHASE_SECONDS) }
+        GESTURES.map { Phase(it.id, it.name, phaseSeconds) }
 
     private val labels = ByteArrayOutputStream()
     private val samples = ByteArrayOutputStream()
@@ -33,7 +39,15 @@ class GuidedCheck(val model: String, val rmsOver: String, val classes: IntArray,
     private val correct = HashMap<Int, Int>()
     private val wrong = HashMap<Int, HashMap<Int, Int>>()
 
+    /** Raw samples recorded so far, in µV, with the gesture label of each (-1 = getting ready). */
+    private val rawSamples = ArrayList<DoubleArray>()
+    private val rawLabels = ArrayList<Int>()
+    val raw: List<DoubleArray> get() = rawSamples
+    val rawLabelsList: List<Int> get() = rawLabels
+
     fun addSample(uv: DoubleArray, phaseIndex: Int) {
+        rawSamples.add(uv)
+        rawLabels.add(phases[phaseIndex].label)
         if (phaseStart[phaseIndex] < 0) phaseStart[phaseIndex] = sampleCount
         labels.write(phases[phaseIndex].label)
         val b = ByteBuffer.allocate(8 * 8).order(ByteOrder.LITTLE_ENDIAN)
@@ -73,7 +87,7 @@ class GuidedCheck(val model: String, val rmsOver: String, val classes: IntArray,
     /** File: b"YADC", int32 version, int32 header length, header JSON, then samples and windows. */
     fun toBytes(): ByteArray {
         val header = """{"model":"$model","scalar_rms_over":"$rmsOver","sampling_rate":$sampleRate,""" +
-            """"window_length":100,"phase_seconds":$PHASE_SECONDS,"ready_seconds":$READY_SECONDS,""" +
+            """"window_length":100,"phase_seconds":$phaseSeconds,"ready_seconds":$READY_SECONDS,""" +
             """"settle_samples":$settleSamples,"classes":[${classes.joinToString(",")}]}"""
         val h = header.toByteArray(Charsets.UTF_8)
         val out = ByteArrayOutputStream()

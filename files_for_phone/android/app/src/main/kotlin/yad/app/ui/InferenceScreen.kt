@@ -52,6 +52,7 @@ import yad.app.PI_GROUP_SIZE
 import yad.app.PI_THRESHOLD
 import yad.app.Source
 import yad.app.UiState
+import yad.app.displayName
 import yad.core.HandCommand
 import kotlin.math.roundToInt
 
@@ -74,7 +75,7 @@ fun InferenceScreen(vm: InferenceViewModel) {
         s.selfTest?.let {
             Text(it, color = if (s.selfTestPassed == true) ResumeGreen else StopRed, fontWeight = FontWeight.Bold)
         }
-        ModelPicker(s, vm::selectModel)
+        ModelPicker(s, vm::selectModel, vm::deleteModel)
         SourcePicker(s, vm::selectSource)
 
         GestureCard(s)
@@ -82,7 +83,7 @@ fun InferenceScreen(vm: InferenceViewModel) {
         ManualButtons(vm::manual)
         HandSection(s, vm::setRealHand)
         RunControls(s, onStart = vm::start, onStop = vm::stopRun, onRealTime = vm::setRealTime)
-        if (s.source == Source.ARMBAND) CheckSection(s, vm::startCheck)
+        if (s.source == Source.ARMBAND) CheckSection(s, vm::startCheck, vm::startCalibration)
         if (s.source == Source.ARMBAND) ArmbandSection(s, vm::setAcceptBroadcast, vm::requestEegMode, vm::captureRawPackets, vm::diagnosticsText)
         Sensitivity(s, vm)
         Stats(s)
@@ -92,12 +93,16 @@ fun InferenceScreen(vm: InferenceViewModel) {
 }
 
 @Composable
-private fun ModelPicker(s: UiState, onSelect: (String) -> Unit) {
+private fun ModelPicker(s: UiState, onSelect: (String) -> Unit, onDelete: (String) -> Unit) {
     Text("User model", style = MaterialTheme.typography.labelMedium)
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         s.models.forEach { name ->
-            FilterChip(selected = name == s.model, onClick = { onSelect(name) }, label = { Text(name) })
+            FilterChip(selected = name == s.model, onClick = { onSelect(name) }, label = { Text(displayName(name)) })
         }
+    }
+    val current = s.model
+    if (current != null && '@' in current) {
+        OutlinedButton(onClick = { onDelete(current) }) { Text("Delete ${displayName(current)}") }
     }
 }
 
@@ -259,21 +264,26 @@ private fun ArmbandSection(
 }
 
 @Composable
-private fun CheckSection(s: UiState, onStart: () -> Unit) {
+private fun CheckSection(s: UiState, onStart: () -> Unit, onCalibrate: () -> Unit) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("Guided check (~35 s)", style = MaterialTheme.typography.titleMedium)
+            Text("Calibrate & check", style = MaterialTheme.typography.titleMedium)
             val prompt = s.checkPrompt
             if (prompt != null) {
                 Text(s.checkStep ?: "", style = MaterialTheme.typography.labelMedium)
                 Text(prompt, fontSize = 30.sp, fontWeight = FontWeight.Bold)
             } else {
-                Text("Hold REST, CLOSE, OPEN, RIGHT, LEFT for 6 s each. Shows how well each gesture is recognised " +
-                    "and saves the data (Downloads/yad_check_….bin) for the PC.", style = MaterialTheme.typography.bodySmall)
-                Button(onClick = onStart, enabled = s.running) { Text("Start guided check") }
+                Text("Calibrate (~1 min): hold each gesture for 10 s; the phone then retrains your model with it " +
+                    "(about 3–5 min on the phone) and saves it as a new version. Do this each time you put the armband on.",
+                    style = MaterialTheme.typography.bodySmall)
+                Button(onClick = onCalibrate, enabled = s.running) { Text("Calibrate") }
+                Text("Guided check (~35 s): hold each gesture for 6 s and see how well each is recognised.",
+                    style = MaterialTheme.typography.bodySmall)
+                OutlinedButton(onClick = onStart, enabled = s.running) { Text("Start guided check") }
             }
             s.checkResults.forEach { Text(it, fontFamily = FontFamily.Monospace, fontSize = 13.sp) }
             s.checkStatus?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+            s.calibrationStatus?.let { Text(it, fontWeight = FontWeight.Bold) }
         }
     }
 }

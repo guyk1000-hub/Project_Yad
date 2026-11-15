@@ -115,6 +115,26 @@ Adapt on the first 3 s of each gesture from the check, test on the last 3 s:
 
 (Optimistic: test windows are from the same hold. → Motivates M5: per-session calibration.)
 
+### M5: per-session calibration on the phone
+
+- Guided recording: 10 s per gesture; windows every 25 samples, inside one gesture, from 1 s in.
+- Retraining on the phone: the user's original recording (exported as 1026 head inputs, every
+  3rd window = 1450 windows) + the new windows, weighted to 37% of the total; same network as
+  fine_tune.py (32-16 tanh, L2 0.01), own L-BFGS in Kotlin, 300 iterations. Saved as a model
+  version (`user · dd/mm hh:mm`), selectable and deletable in the app.
+- Recipe chosen offline on the 14 Nov checks (train on 2.5 s/gesture, test on the last 3 s):
+
+| Recipe (sklearn) | Guy | Tomer |
+|---|---|---|
+| windows every 10, new = 29%, full training | 90.1% | — |
+| windows every 10, new = 29%, 300 iterations | 80.3% | 97.2% |
+| windows every 50, new = 20%, 300 iterations | 69.3% | 95.0% |
+| windows every 50, new = 37%, 300 iterations | 77.0% | 98.7% |
+| **Kotlin trainer**, every 50, new = 37%, 300 iterations | **83.1%** | **95.9%** |
+
+  More data per gesture matters most (Guy); real calibration records 4× more per gesture than
+  this test. Kotlin trainer: 33 s for 300 iterations on the dev PC.
+
 ## Decisions log
 
 | Date | Decision | Why |
@@ -126,6 +146,7 @@ Adapt on the first 3 s of each gesture from the check, test on the last 3 s:
 | 2026-11-15 | Pi dropped from the project | Phone does everything the Pi did |
 | 2026-11-15 | Next: per-session calibration on the phone (M5) | E-adapt results |
 | 2026-11-15 | fine_tune.py reports held-out-take accuracy | Honest number |
+| 2026-11-15 | Train on the phone (own L-BFGS), not on the PC | No PC round trip each session; matches sklearn offline |
 
 ## Ethics notes (to expand)
 
