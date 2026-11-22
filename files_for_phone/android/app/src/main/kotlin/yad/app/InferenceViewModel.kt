@@ -589,7 +589,8 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
             val gestures = if (takes > 0 || h == null) s.recordGestures.gestures
                 else listOf(Gesture.REST) + h.classes.toList().mapNotNull { Gesture.fromId(it) }.filter { it != Gesture.REST }
             check = GuidedCheck(s.model ?: s.person ?: "?", (h?.rmsOver ?: yad.core.RmsOver.TIME).jsonName,
-                if (takes > 0 || h == null) gestures.map { it.id }.toIntArray() else h.classes,
+                // "classes" describes the per-window probabilities, which come from the loaded model (if any).
+                h?.classes ?: gestures.map { it.id }.toIntArray(),
                 phaseSeconds = if (takes > 0) Calibration.PHASE_SECONDS else GuidedCheck.PHASE_SECONDS,
                 takes = maxOf(takes, 1), gestures = gestures)
             _state.update { it.copy(checkResults = emptyList(), checkStatus = null, trainingStatus = null) }

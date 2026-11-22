@@ -333,6 +333,23 @@ Results: to be measured on the phone (table to fill: mode, N, hop, accuracy, med
   (the hand's panel), Settings (Steady / Fast, how sure before moving, wrist follows effort,
   engineering view). The engineering screens are unchanged, one tap away.
 
+### E-fingers: Guy's first 7-gesture recording (22 Nov): electrode contact, not the model
+
+Guy recorded 7 gestures (3 takes × 10 s), trained on the phone from that recording only, then
+checked: **32%**; after a 1-take calibration: **58%** (REST/CLOSE/OPEN 92–100%, the rest 21–42%).
+The phone's numbers equal the PC's (|Δp| ~1e-6). Within the recording (hold out one take):
+
+| Gestures | take 1 | take 2 | take 3 |
+|---|---|---|---|
+| 5 (no fingers) | 99% | 90% | 89% |
+| 7 (with POINT, PEACE) | 64% | 55% | 52% |
+
+The cause: in every POINT take channel 8 reads ~3000 µV with spikes up to 52,000 µV and all other
+channels rise together (~240 µV vs ~50): an electrode losing skin contact / the band moving, not
+muscle. PEACE: channel 7 worsens take by take (54 → 170 → 398 µV). The model learned the artefacts,
+which don't repeat in the check. → A contact check during recording (warn + leave bad windows
+out) is needed; finger gestures need a snug band.
+
 ## Decisions log
 
 | Date | Decision | Why |
