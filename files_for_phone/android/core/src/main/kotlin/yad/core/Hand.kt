@@ -1,5 +1,7 @@
 package yad.core
 
+import kotlinx.serialization.Serializable
+
 /** Class ids used by every model (files_for_pi/realtime_pi_classify.py GESTURE_MAP). */
 enum class Gesture(val id: Int) {
     REST(0), CLOSE(1), OPEN(2), RIGHT(3), LEFT(4);
@@ -20,6 +22,7 @@ enum class Gesture(val id: Int) {
 }
 
 /** What the hand should do, independent of any hand's protocol (each driver encodes it its own way). */
+@Serializable
 enum class HandCommand(val title: String) {
     OPEN("OPEN"), CLOSE("CLOSE"), LEFT("LEFT"), RIGHT("RIGHT"),
     STOP("STOP"), STEP("CLOSE A BIT"), CALIBRATE("CALIBRATE"),
@@ -29,12 +32,23 @@ enum class HandCommand(val title: String) {
  * The hands the app can drive, each with what it supports. The app shows only these commands;
  * anything else (e.g. a LEFT gesture on the new hand) is logged and not sent.
  */
-enum class HandModel(val title: String, val commands: List<HandCommand>, val speedRange: IntRange?, val defaultSpeed: Int) {
+enum class HandModel(
+    val title: String,
+    val commands: List<HandCommand>,
+    val speedRange: IntRange?,
+    val defaultSpeed: Int,
+    /** Fingers that can be moved one by one (POSITION), numbered from 1; empty if the hand can't. */
+    val fingers: List<String> = emptyList(),
+    /** What the hand's own manager app offers but this hand's code ignores: shown, not sent. */
+    val notYetSupported: List<String> = emptyList(),
+) {
     HAIFA3D_V1("Old hand (Haifa3D v1)", listOf(HandCommand.OPEN, HandCommand.CLOSE, HandCommand.LEFT, HandCommand.RIGHT), null, 0),
     CONTROLLER_V2(
         "New hand (controller v2)",
         listOf(HandCommand.OPEN, HandCommand.CLOSE, HandCommand.STOP, HandCommand.STEP, HandCommand.CALIBRATE),
         HandControllerV2Protocol.SPEED_RANGE, HandControllerV2Protocol.DEFAULT_SPEED,
+        fingers = listOf("Index", "Middle", "Ring", "Pinky"),
+        notYetSupported = listOf("Wrist (LEFT / RIGHT)", "Subscribe", "Special commands 1–8", "Packet", "Screen packet"),
     );
 
     fun supports(command: HandCommand) = command in commands
@@ -77,6 +91,7 @@ object HandControllerV2Protocol {
     private const val FORWARD = 1      // all fingers fully closed
     private const val BACKWARD = 2     // all fingers fully open
     private const val STEP = 5         // all fingers 10% more closed
+    private const val POSITION = 6     // [6, finger, percent]
     private const val CALIBRATE = 7    // re-learn each finger's limits, then open
     private const val VELOCITY = 8
 
@@ -94,12 +109,19 @@ object HandControllerV2Protocol {
         HandCommand.LEFT, HandCommand.RIGHT -> null    // no wrist on this hand
     }
 
+    /** One finger (1 = M1 … 4 = M4) to [percent] of its travel, 0 = open, 100 = closed. */
+    fun position(finger: Int, percent: Int): ByteArray {
+        require(finger in 1..4) { "finger $finger outside 1..4" }
+        require(percent in 0..100) { "position $percent outside 0..100" }
+        return message(POSITION, percent, finger)
+    }
+
     fun speed(value: Int): ByteArray {
         require(value in SPEED_RANGE) { "speed $value outside $SPEED_RANGE" }
         return message(VELOCITY, value)
     }
 
-    private fun message(command: Int, value: Int = 0) = byteArrayOf(command.toByte(), 0, value.toByte())
+    private fun message(command: Int, value: Int = 0, arg: Int = 0) = byteArrayOf(command.toByte(), arg.toByte(), value.toByte())
 }
 
 /** Where commands go: the real hand over BLE, or a simulated one. */

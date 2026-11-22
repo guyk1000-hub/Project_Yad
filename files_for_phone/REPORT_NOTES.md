@@ -268,6 +268,17 @@ drives either hand, picked by hand, and each hand offers only what it supports:
 | STOP button | blocks the classifier | blocks the classifier and stops the motors |
 | LEFT / RIGHT gestures | move the wrist | logged as "not supported", nothing sent |
 
+0.7.1: everything the new hand's own manager app ("Android Hand Commander", read from its APK
+with `dexdump`: no source in the repo) offers, as far as the hand's code runs it:
+
+| Manager app function | Bytes | Hand's code | In our app |
+|---|---|---|---|
+| Forward / Backward / Step / Stop / Calibrate | `[1]` `[2]` `[5]` `[0]` `[7]` | runs | buttons (calibrate asks first) |
+| Velocity | `[8, 8, v]` | runs (reads byte 2) | speed slider |
+| Position M1–M4 | `[6, motor, %]` | runs | a slider per finger |
+| Direct Commands (8 editable presets, JSON load / save / share, defaults) | special codes | ignored | presets made of position / open / close, which the hand runs; editable, import / export JSON, defaults |
+| Subscribe, specials, "Packet" (`0xF0`), "Screen packet" (`0xF4`) | — | ignored | shown as "not supported yet" |
+
 ## Decisions log
 
 | Date | Decision | Why |

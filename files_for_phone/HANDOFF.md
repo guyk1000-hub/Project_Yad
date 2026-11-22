@@ -76,6 +76,10 @@ app (old v1 / new v2, remembered). Commands per hand come from `core/Hand.kt` `H
 advertising `0000abcd…`, notifications on `0000dcba…`, bytes `[cmd, 0, value]`. A speed slider
 (VELOCITY) is sent on change and on connect. STOP also sends the hand's STOP. Unsupported
 commands are logged, not sent. Needs BLUETOOTH_ADVERTISE.
+**0.7.1 (`~/ProjectYad-0.7.1.apk`, untested):** a new-hand panel (`ui/NewHandPanel.kt`) with every
+function of their manager app that the hand runs: whole-hand buttons, speed, a position per finger
+(`[6, finger, %]`), and presets (`core/HandPresets.kt`, stored in prefs, import/export JSON).
+Placeholders for what the hand ignores. Their APK was read with `dexdump`; details in REPORT_NOTES.
 
 **Rule (from the user, 22 Nov): the private repo and the hand's firmware/config are NOT ours to
 change.** Use the hand as it is; report hardware or firmware limits to its maintainers. So, for

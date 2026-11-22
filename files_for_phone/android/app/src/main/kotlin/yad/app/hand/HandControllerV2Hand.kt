@@ -171,6 +171,8 @@ class HandControllerV2Hand(private val context: Context) : HandDriver {
 
     override suspend fun setSpeed(value: Int) = notify(HandControllerV2Protocol.speed(value))
 
+    override suspend fun setFingerPosition(finger: Int, percent: Int) = notify(HandControllerV2Protocol.position(finger, percent))
+
     /** One notification to the hand; throws if it isn't connected or the send fails. */
     private suspend fun notify(bytes: ByteArray) = sendLock.withLock {
         val s = server

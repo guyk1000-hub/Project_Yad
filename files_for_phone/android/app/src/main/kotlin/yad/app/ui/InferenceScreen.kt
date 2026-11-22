@@ -86,8 +86,7 @@ fun InferenceScreen(vm: InferenceViewModel) {
         GestureCard(s)
         StopButton(s.stopped, vm::toggleStop)
         HandPicker(s, vm::selectHandModel)
-        ManualButtons(s, vm::manual)
-        HandSpeed(s, vm::setHandSpeed)
+        if (s.handModel == HandModel.CONTROLLER_V2) NewHandPanel(s, vm) else ManualButtons(s, vm::manual)
         HandSection(s, vm::setRealHand)
         RunControls(s, onStart = vm::start, onStop = vm::stopRun, onRealTime = vm::setRealTime)
         TrainSection(s, vm)
@@ -174,18 +173,6 @@ private fun ManualButtons(s: UiState, onCommand: (HandCommand) -> Unit) {
             OutlinedButton(onClick = { onCommand(cmd) }) { Text(cmd.title) }
         }
     }
-}
-
-@Composable
-private fun HandSpeed(s: UiState, onSpeed: (Int) -> Unit) {
-    val range = s.handModel.speedRange ?: return
-    var value by remember(s.handModel) { mutableStateOf(s.handSpeed.toFloat()) }
-    Text("Hand speed: ${value.roundToInt()}", style = MaterialTheme.typography.labelMedium)
-    Slider(
-        value = value, onValueChange = { value = it },
-        valueRange = range.first.toFloat()..range.last.toFloat(), steps = (range.last - range.first) / 10 - 1,
-        onValueChangeFinished = { onSpeed(value.roundToInt()) },
-    )
 }
 
 @Composable
@@ -398,6 +385,6 @@ private fun CommandLog(s: UiState) {
     Text("Commands to the hand", style = MaterialTheme.typography.titleMedium)
     if (s.log.isEmpty()) Text("none yet", style = MaterialTheme.typography.bodySmall)
     s.log.forEach { e ->
-        Text("${e.time}  ${e.source.padEnd(10)} ${e.command.name.padEnd(5)}  ${e.outcome}", fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+        Text("${e.time}  ${e.source.padEnd(10)} ${e.what.padEnd(5)}  ${e.outcome}", fontFamily = FontFamily.Monospace, fontSize = 12.sp)
     }
 }

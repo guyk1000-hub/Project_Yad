@@ -38,6 +38,9 @@ import yad.core.GroupAverageDecisionPolicy
 import yad.core.GroupScorer
 import yad.core.HandCommand
 import yad.core.HandModel
+import yad.core.HandPreset
+import yad.core.HandPresets
+import yad.core.PresetAction
 import yad.core.MlpHead
 import yad.core.ReplayRecording
 import yad.core.ScalarFeatures
@@ -51,7 +54,7 @@ enum class Source { REPLAY, ARMBAND }
 
 data class RecordingInfo(val fileName: String, val seconds: Int)
 
-data class LogEntry(val time: String, val source: String, val command: HandCommand, val outcome: String)
+data class LogEntry(val time: String, val source: String, val what: String, val outcome: String)
 
 data class UiState(
     val models: List<String> = emptyList(),
@@ -83,6 +86,9 @@ data class UiState(
     // hand
     val handModel: HandModel = HandModel.HAIFA3D_V1,
     val handSpeed: Int = HandModel.CONTROLLER_V2.defaultSpeed,
+    val fingerPositions: List<Int> = List(HandModel.CONTROLLER_V2.fingers.size) { 0 },
+    val presets: List<HandPreset> = HandPresets.DEFAULTS,
+    val presetMessage: String? = null,
     val realHand: Boolean = false,
     val handState: String = "simulated",
     val simulatedPosition: HandCommand? = null,
@@ -128,6 +134,7 @@ fun displayName(name: String): String = yad.core.ModelNames.display(name)
 const val PI_GROUP_SIZE = 6
 private const val LOG_SIZE = 40
 private const val PREF_HAND = "hand_model"
+private const val PREF_PRESETS = "hand_presets"
 private const val TIMING_WINDOW = 50
 
 /**
@@ -194,6 +201,9 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { receiver.status.collect { st -> _state.update { it.copy(armband = st) } } }
         val savedModel = prefs.getString(PREF_HAND, null)?.let { n -> HandModel.entries.firstOrNull { it.name == n } }
         if (savedModel != null) _state.update { it.copy(handModel = savedModel) }
+        prefs.getString(PREF_PRESETS, null)?.let { text ->
+            runCatching { HandPresets.fromJson(text) }.onSuccess { p -> _state.update { it.copy(presets = p) } }
+        }
         for ((model, driver) in drivers) viewModelScope.launch {
             driver.state.collect { st ->
                 val text = when (st) {
@@ -630,6 +640,61 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(handModel = model, handSpeed = model.defaultSpeed, realHand = false, handState = "simulated") }
     }
 
+    /** One finger to a position (0 = open, 100 = closed), for hands that can move single fingers. */
+    fun setFingerPosition(finger: Int, percent: Int) {
+        _state.update { s -> s.copy(fingerPositions = s.fingerPositions.toMutableList().also { if (finger - 1 in it.indices) it[finger - 1] = percent }) }
+        viewModelScope.launch(Dispatchers.Default) { moveFinger(finger, percent, "manual") }
+    }
+
+    private suspend fun moveFinger(finger: Int, percent: Int, source: String) {
+        val model = _state.value.handModel
+        val what = "${model.fingers.getOrElse(finger - 1) { "finger $finger" }} → $percent%"
+        if (finger !in 1..model.fingers.size) return log(source, what, "not supported by the ${model.title.lowercase()}")
+        if (!_state.value.realHand) return log(source, what, "simulated")
+        try {
+            realHand.setFingerPosition(finger, percent)
+            log(source, what, "sent to hand")
+        } catch (e: Exception) {
+            log(source, what, "NOT sent: ${e.message}")
+        }
+    }
+
+    /** Runs a preset's actions in order. Like manual buttons, presets work even when STOP is on. */
+    fun runPreset(preset: HandPreset) {
+        viewModelScope.launch(Dispatchers.Default) {
+            val fingers = _state.value.handModel.fingers.size
+            for (a in preset.actions) when (a) {
+                is PresetAction.Command -> deliver(a.command, "preset")
+                is PresetAction.AllFingers -> for (f in 1..fingers) moveFinger(f, a.percent, "preset")
+                is PresetAction.Finger -> moveFinger(a.finger, a.percent, "preset")
+            }
+        }
+    }
+
+    fun savePresets(presets: List<HandPreset>, message: String = "Presets saved") {
+        prefs.edit().putString(PREF_PRESETS, HandPresets.toJson(presets)).apply()
+        _state.update { it.copy(presets = presets, presetMessage = message) }
+    }
+
+    fun resetPresets() = savePresets(HandPresets.DEFAULTS, "Default presets restored")
+
+    fun exportPresets() {
+        val msg = saveToDownloads("yad_presets_${timestamp()}.json", HandPresets.toJson(_state.value.presets).toByteArray(Charsets.UTF_8))
+        _state.update { it.copy(presetMessage = msg) }
+    }
+
+    fun importPresets(uri: android.net.Uri?) {
+        uri ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val text = getApplication<Application>().contentResolver.openInputStream(uri)!!.use { it.readBytes().toString(Charsets.UTF_8) }
+                savePresets(HandPresets.fromJson(text), "Presets imported")
+            } catch (e: Exception) {
+                _state.update { it.copy(presetMessage = "Import failed: ${e.message}") }
+            }
+        }
+    }
+
     /** For hands with a speed: remembered, and sent to the real hand when connected. */
     fun setHandSpeed(value: Int) {
         _state.update { it.copy(handSpeed = value) }
@@ -675,8 +740,10 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun log(source: String, cmd: HandCommand, outcome: String) =
-        _state.update { it.copy(log = (listOf(LogEntry(now(), source, cmd, outcome)) + it.log).take(LOG_SIZE)) }
+    private fun log(source: String, cmd: HandCommand, outcome: String) = log(source, cmd.title, outcome)
+
+    private fun log(source: String, what: String, outcome: String) =
+        _state.update { it.copy(log = (listOf(LogEntry(now(), source, what, outcome)) + it.log).take(LOG_SIZE)) }
 
     // ---- settings ------------------------------------------------------------------------
 

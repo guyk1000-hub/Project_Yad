@@ -35,3 +35,28 @@ class HandModelTest {
         assertTrue(HandModel.HAIFA3D_V1.speedRange == null)
     }
 }
+
+class HandPresetsTest {
+    @Test
+    fun `finger position bytes`() {
+        assertContentEquals(byteArrayOf(6, 2, 40), HandControllerV2Protocol.position(2, 40))   // [POSITION, M2, 40%]
+        assertFailsWith<IllegalArgumentException> { HandControllerV2Protocol.position(5, 40) }
+        assertFailsWith<IllegalArgumentException> { HandControllerV2Protocol.position(1, 101) }
+    }
+
+    @Test
+    fun `presets survive export and import`() {
+        val custom = HandPresets.DEFAULTS + HandPreset("Point", listOf(PresetAction.AllFingers(100), PresetAction.Finger(1, 0)))
+        val back = HandPresets.fromJson(HandPresets.toJson(custom))
+        assertEquals(custom, back)
+        assertEquals(8, HandPresets.DEFAULTS.size)
+        assertEquals("Index to 0%", HandPresets.describe(PresetAction.Finger(1, 0), HandModel.CONTROLLER_V2.fingers))
+    }
+
+    @Test
+    fun `bad preset files are refused with a reason`() {
+        assertFailsWith<IllegalArgumentException> { HandPresets.fromJson("{}") }
+        assertFailsWith<IllegalArgumentException> { HandPresets.fromJson("""[{"name":"x","actions":[{"type":"all","percent":300}]}]""") }
+        assertFailsWith<IllegalArgumentException> { HandPresets.fromJson("""[{"name":"x","actions":[{"type":"finger","finger":9,"percent":10}]}]""") }
+    }
+}

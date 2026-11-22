@@ -16,6 +16,9 @@ interface HandDriver : HandSink {
 
     /** Movement speed, for hands that have one (HandModel.speedRange). */
     suspend fun setSpeed(value: Int) {}
+
+    /** One finger (numbered from 1) to [percent], 0 = open; for hands with HandModel.fingers. */
+    suspend fun setFingerPosition(finger: Int, percent: Int): Unit = error("this hand can't move single fingers")
 }
 
 sealed interface HandState {
