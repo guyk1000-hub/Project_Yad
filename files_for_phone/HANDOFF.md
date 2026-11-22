@@ -70,6 +70,20 @@ in `~/ext/haifa3d/private/`, outside this repo; NOT yet confirmed against the re
 - Sensor route: needs the phone's fixed MAC in the config. Android randomises its BLE address,
   so it's a poor fit unless the firmware changes.
 
+**What we found with the real hand (22 Nov):**
+- It runs this v2 code. It never shows up in BLE scans, because it only scans for the manager.
+- On battery power it hung at startup (red RGB LED + steady blue LED = stuck in setup, or halt()
+  after a calibration failure). Powered from a PC's USB-C, it booted, blinked, and the repo's
+  manager APK ("Android Hand Commander": start the server, then power the hand) moved it with
+  FORWARD (close) / BACKWARD (open). The user said it works "terribly".
+- The hardware: ONE M5 4EncoderMotor board with 4 finger motors plugged in (labelled 1–4); the
+  ESP32 sits on a carrier board connected to it. A thumb lead "T" is disconnected. The hand has a
+  physical wrist, but it isn't connected anywhere.
+- The repo's Hand2 config has the pinky (slot 3) OFF, so the 4th motor never moves, and the wrist
+  ("turn") on a second module M5b (0x25, off, slot -1 placeholder). A wrist or motorised thumb
+  would need a second M5 board + config + a firmware change (the manager's CLOCKWISE /
+  COUNTER_CLOCKWISE currently move all fingers). Ask the maintainers before changing the hand's software.
+
 To verify with the hand: (1) does their manager APK control it; (2) nRF Connect scan: the
 hand probably doesn't advertise at all in v2; (3) which motors/config the hand has.
 
