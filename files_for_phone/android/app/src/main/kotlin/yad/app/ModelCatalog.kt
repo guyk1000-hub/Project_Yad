@@ -2,7 +2,10 @@ package yad.app
 
 import android.content.Context
 import yad.core.MlpHead
+import yad.core.ModelLineage
 import yad.core.ModelNames
+import yad.core.RmsOver
+import yad.core.TrainingSet
 import yad.core.ReplayRecording
 import java.io.File
 
@@ -35,7 +38,7 @@ class ModelCatalog(private val context: Context) {
     /** Bundled models, then calibrated versions (newest first within each user). */
     val names: List<String>
         get() {
-            val calibrated = calibratedDir.listFiles { f -> f.name.endsWith(".json") }.orEmpty()
+            val calibrated = calibratedDir.listFiles { f -> f.name.endsWith(".json") && !f.name.endsWith(".lineage.json") }.orEmpty()
                 .map { it.name.removeSuffix(".json") }
                 .sortedByDescending { it.substringAfter('@') }
             return bundled + calibrated
@@ -89,6 +92,38 @@ class ModelCatalog(private val context: Context) {
         null
     }
 
+    /** What [name] was built from (stored next to it; read from its note for older models). */
+    fun lineage(name: String): ModelLineage {
+        val person = userOf(name)
+        if (!isPhoneMade(name)) return ModelLineage.bundled(person)
+        val f = File(calibratedDir, "$name.lineage.json")
+        if (f.exists()) return ModelLineage.fromJson(f.readText())
+        val note = Regex("\"trained_on\"\\s*:\\s*\"([^\"]*)\"").find(File(calibratedDir, "$name.json").readText())?.groupValues?.get(1).orEmpty()
+        return ModelLineage.fromLegacyNote(person, note)
+    }
+
+    fun saveLineage(name: String, lineage: ModelLineage) {
+        require(lineage.person == userOf(name)) { "a model of ${userOf(name)} can't be built from ${lineage.person}'s data" }
+        File(calibratedDir, "$name.lineage.json").writeText(lineage.toJson())
+    }
+
+    /** The lineage's recordings, from the person's own folder only; throws if one is missing. */
+    fun lineageFiles(lineage: ModelLineage): List<File> {
+        val dir = recordingsDir(lineage.person)
+        return lineage.recordings.map { n ->
+            val f = File(dir, n)
+            check(f.exists()) { "recording $n of ${lineage.person} is missing (deleted?)" }
+            f
+        }
+    }
+
+    /** The person's original PC recording as head inputs (bundled people only). */
+    fun pcTrainingData(person: String): Pair<TrainingSet, RmsOver>? = try {
+        TrainingSet.parse(context.assets.open("train_$person.bin").use { it.readBytes() })
+    } catch (_: java.io.IOException) {
+        null
+    }
+
     fun saveCalibrated(name: String, headJson: String) {
         val f = File(calibratedDir, "$name.json")
         check(!f.exists()) { "a model named $name already exists" }
@@ -118,6 +153,8 @@ class ModelCatalog(private val context: Context) {
     }
 
     fun delete(name: String) {
-        if (isPhoneMade(name)) File(calibratedDir, "$name.json").delete()
+        if (!isPhoneMade(name)) return
+        File(calibratedDir, "$name.json").delete()
+        File(calibratedDir, "$name.lineage.json").delete()
     }
 }

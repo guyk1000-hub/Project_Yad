@@ -370,6 +370,7 @@ out) is needed; finger gestures need a snug band.
 | 2026-11-22 | Today's screens are the engineering view; an easy end-user view comes later | The user's plan |
 | 2026-11-22 | Keep the CNN; latency via the decision rule (Fast mode); verify on the phone only | The user: the CNN is the concept; no more PC checks |
 | 2026-11-22 | Finger gestures as absolute poses; wrist proportional to effort (old hand only); a user view for anyone | The user's three directions |
+| 2026-11-22 | Model lineages: a full recording starts a model; a calibration extends the chosen model's recordings; never mix people or gesture sets; a name is required | The user's rules for training |
 | 2026-11-15 | Train on the phone (own L-BFGS), not on the PC | No PC round trip each session; matches sklearn offline |
 
 ## Ethics notes (to expand)

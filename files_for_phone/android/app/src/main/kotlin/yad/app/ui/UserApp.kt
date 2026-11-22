@@ -189,6 +189,8 @@ private fun HomeTab(s: UiState, vm: InferenceViewModel, onChangePerson: () -> Un
         TextButton(onClick = onChangePerson) { Text("Change person") }
     }
 
+    ModelInUseCard(s, onChange = { choosingModel = true })
+
     val armbandLive = s.source == Source.ARMBAND && s.running
     val receiving = armbandLive && s.armband.samplesPerSecond > 400
     Step(
@@ -207,16 +209,11 @@ private fun HomeTab(s: UiState, vm: InferenceViewModel, onChangePerson: () -> Un
     Step(
         2, "Your gestures",
         if (s.model != null) StepState.DONE else StepState.TODO,
-        if (s.model != null) "Model ready (${yad.app.displayName(s.model)}). Just put the armband on? A 1-minute calibration makes it more accurate."
+        if (s.model != null) "Ready. Just put the armband on? A 1-minute calibration of this model makes it more accurate."
         else "The phone doesn't know your gestures yet. Record them once: about 3 minutes.",
     ) {
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (s.model != null) OutlinedButton(onClick = onTrain) { Text("Calibrate (1 min)") }
-            else Button(onClick = onTrain) { Text("Record my gestures") }
-            if (personModels(s).isNotEmpty()) {
-                OutlinedButton(onClick = { choosingModel = true }) { Text("Models (${personModels(s).size})") }
-            }
-        }
+        if (s.model != null) OutlinedButton(onClick = onTrain) { Text("Calibrate (1 min)") }
+        else Button(onClick = onTrain) { Text("Record my gestures") }
     }
     if (choosingModel) ModelChooser(s, vm, onDone = { choosingModel = false })
 
@@ -330,20 +327,33 @@ private fun TrainTab(s: UiState, vm: InferenceViewModel, onHome: () -> Unit) {
 
     OutlinedTextField(
         value = s.newModelLabel, onValueChange = vm::setNewModelLabel, singleLine = true, modifier = Modifier.fillMaxWidth(),
-        label = { Text("Name for the new model (optional)") },
-        supportingText = { Text("e.g. \"morning\" or \"left arm\". Recording or calibrating saves a new model with this name; your other models stay.") },
+        label = { Text("Name for the new model") },
+        supportingText = { Text("Each recording or calibration makes a new model; your other models stay. Left empty? You'll be asked after recording.") },
     )
 
-    if (s.model != null) ActionCard(
-        "Quick calibration", "1 minute",
-        "Hold each gesture for 10 seconds. Do this each time you put the armband on: it keeps the phone in tune with you.",
-        "Start calibration", live,
-    ) { vm.startRecording(1) }
+    if (s.model != null) {
+        var target by rememberSaveable(s.model) { mutableStateOf(s.model) }
+        var choosing by remember { mutableStateOf(false) }
+        ActionCard(
+            "Quick calibration", "1 minute",
+            "Hold each gesture for 10 seconds, once. The new model builds on the one you choose: its recordings plus this one, with the same gestures.",
+            "Start calibration", live,
+            extra = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Calibrate: ", style = MaterialTheme.typography.bodyMedium)
+                    Text(yad.app.displayName(target), fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                    TextButton(onClick = { choosing = true }) { Text("Choose…") }
+                }
+            },
+        ) { vm.startCalibration(target) }
+        if (choosing) ModelChooser(s, vm, onDone = { choosing = false }, title = "Which model to calibrate?", selected = target,
+            onPick = { target = it }, allowDelete = false)
+    }
 
     var fingers by rememberSaveable { mutableStateOf(s.recordGestures == GestureSet.FINGERS) }
     ActionCard(
-        if (s.model == null) "Record your gestures" else "Full recording", "about 3 minutes",
-        "Hold each gesture for 10 seconds, three rounds, with short breaks. The phone then learns them (a few minutes).",
+        if (s.model == null) "Record your gestures" else "New model (full recording)", "about 3 minutes",
+        "Hold each gesture for 10 seconds, three rounds, with short breaks. This starts a new model from this recording alone.",
         "Start recording", live,
         extra = {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -351,7 +361,7 @@ private fun TrainTab(s: UiState, vm: InferenceViewModel, onHome: () -> Unit) {
                 Text(if (fingers) "With finger gestures (point, peace sign)" else "Hand gestures only (fist, open, wrist)", style = MaterialTheme.typography.bodyMedium)
             }
         },
-    ) { vm.startRecording(Calibration.RECORDING_TAKES) }
+    ) { vm.startNewModelRecording() }
 
     ActionCard(
         "Check how well it works", "35 seconds",
@@ -487,6 +497,26 @@ private fun SettingsTab(s: UiState, vm: InferenceViewModel) {
 fun AppRoot(vm: InferenceViewModel) {
     val s by vm.state.collectAsStateWithLifecycle()
     if (s.engineering) InferenceScreen(vm) else UserApp(s, vm)
+    if (s.askName) NameDialog(vm)
+}
+
+/** After a recording without a name: the new model needs one before it's trained. */
+@Composable
+private fun NameDialog(vm: InferenceViewModel) {
+    var name by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = {},
+        title = { Text("Name the new model") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("The recording is saved. What shall the new model be called?")
+                OutlinedTextField(value = name, onValueChange = { name = it }, singleLine = true, label = { Text("Name") },
+                    placeholder = { Text("e.g. morning, fingers, left arm") })
+            }
+        },
+        confirmButton = { TextButton(onClick = { vm.nameAndTrain(name) }, enabled = name.isNotBlank()) { Text("Save & train") } },
+        dismissButton = { TextButton(onClick = vm::skipTraining) { Text("Not now") } },
+    )
 }
 
 /** [s.person]'s models, newest first (phone-made ones carry their date). */
@@ -495,17 +525,23 @@ private fun personModels(s: UiState): List<String> =
 
 /** Pick which of the person's models to use; phone-made ones can be deleted. */
 @Composable
-private fun ModelChooser(s: UiState, vm: InferenceViewModel, onDone: () -> Unit) {
+private fun ModelChooser(
+    s: UiState, vm: InferenceViewModel, onDone: () -> Unit,
+    title: String = "${s.person?.replaceFirstChar { it.uppercase() }}'s models",
+    selected: String? = s.model,
+    onPick: (String) -> Unit = { vm.selectModel(it) },
+    allowDelete: Boolean = true,
+) {
     var deleting by remember { mutableStateOf<String?>(null) }
     AlertDialog(
         onDismissRequest = onDone,
-        title = { Text("${s.person?.replaceFirstChar { it.uppercase() }}'s models") },
+        title = { Text(title) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 personModels(s).forEach { m ->
                     Card(
-                        Modifier.fillMaxWidth().clickable { vm.selectModel(m); onDone() },
-                        colors = CardDefaults.cardColors(containerColor = if (m == s.model) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant),
+                        Modifier.fillMaxWidth().clickable { onPick(m); onDone() },
+                        colors = CardDefaults.cardColors(containerColor = if (m == selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant),
                     ) {
                         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
@@ -518,7 +554,7 @@ private fun ModelChooser(s: UiState, vm: InferenceViewModel, onDone: () -> Unit)
                                     }, style = MaterialTheme.typography.bodySmall,
                                 )
                             }
-                            if ('@' in m) TextButton(onClick = { deleting = m }) { Text("Delete", color = Danger) }
+                            if (allowDelete && '@' in m) TextButton(onClick = { deleting = m }) { Text("Delete", color = Danger) }
                         }
                     }
                 }
@@ -572,6 +608,21 @@ private fun SimulatedHandView(s: UiState, vm: InferenceViewModel) {
                 if (s.proportionalWrist) Text("Wrist follows effort is on" + (s.wristEffortPct?.let { ": last effort $it% of your usual" } ?: ""), style = MaterialTheme.typography.bodySmall)
                 TextButton(onClick = vm::resetSimulatedWrist) { Text("Straighten") }
             }
+        }
+    }
+}
+
+/** Home: which model is in use, what it knows and what it's built from. */
+@Composable
+private fun ModelInUseCard(s: UiState, onChange: () -> Unit) {
+    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("Model in use", style = MaterialTheme.typography.labelMedium)
+                Text(s.model?.let { yad.app.displayName(it) } ?: "none yet", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                s.modelInfo?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+            }
+            if (personModels(s).isNotEmpty()) OutlinedButton(onClick = onChange) { Text("Change") }
         }
     }
 }

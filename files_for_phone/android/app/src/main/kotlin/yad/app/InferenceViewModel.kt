@@ -125,6 +125,10 @@ data class UiState(
     val recordings: List<RecordingInfo> = emptyList(),
     val newModelLabel: String = "",
     val recordGestures: GestureSet = GestureSet.BASIC,
+    /** A recording is done and waits for a name before it's trained. */
+    val askName: Boolean = false,
+    /** About the model in use: gestures and what it was built from, for Home. */
+    val modelInfo: String? = null,
     val person: String? = null,
     val people: List<String> = emptyList(),
     /** false = the easy user view; true = the engineering screens. */
@@ -301,9 +305,15 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
         resetSignalPath()
         val person = catalog.userOf(name)
         refreshRecordings(person)
+        val lin = runCatching { catalog.lineage(name) }.getOrNull()
+        val info = "${h.classes.size} gestures · built from " + when {
+            lin == null -> "unknown recordings"
+            lin.pcData && lin.recordings.isEmpty() -> "the original PC recording"
+            else -> "${lin.recordings.size} recording${if (lin.recordings.size == 1) "" else "s"}" + if (lin.pcData) " + the PC recording" else ""
+        }
         _state.update {
             it.copy(
-                model = name, person = person, people = catalog.people, peopleModels = peopleModels(),
+                model = name, person = person, people = catalog.people, peopleModels = peopleModels(), modelInfo = info,
                 restReference = r?.let { rec -> ChannelLevels.restReference(rec) },
                 status = "$name: features RMS over ${h.rmsOver.jsonName}" + (r?.let { rec -> "; replay ${rec.size} windows (${rec.size * WINDOW_MS / 1000} s)" } ?: "; no recording to replay"),
             )
@@ -319,7 +329,7 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
                 head = null; replay = null; wrist = null
                 resetSignalPath()
                 refreshRecordings(person)
-                _state.update { it.copy(model = null, person = person, people = catalog.people, peopleModels = peopleModels(), restReference = null, status = "$person: no model yet") }
+                _state.update { it.copy(model = null, modelInfo = null, person = person, people = catalog.people, peopleModels = peopleModels(), restReference = null, status = "$person: no model yet") }
             }
         }
     }
@@ -570,7 +580,23 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
      * Records [takes] × 10 s of each gesture into the user's phone recordings, then trains the
      * user's model from zero on all of them (Calibration.RECORDING_*). 1 take = a quick calibration.
      */
-    fun startRecording(takes: Int) = startGuided(takes)
+    /** What the running recording is for. Worker thread only. */
+    private var recordingParent: String? = null      // null = a new model; else the model being calibrated
+
+    /** Engineering view: Record = a new model; Quick calibration = calibrate the model in use. */
+    fun startRecording(takes: Int) = if (takes > 1) startNewModelRecording() else _state.value.model?.let { startCalibration(it) } ?: startNewModelRecording()
+
+    /** A full recording that starts a new model, with the chosen gesture set. */
+    fun startNewModelRecording() {
+        viewModelScope.launch(worker) { recordingParent = null }
+        startGuided(Calibration.RECORDING_TAKES)
+    }
+
+    /** A 1-round recording that calibrates [model]: same gestures, built on its recordings. */
+    fun startCalibration(model: String) {
+        viewModelScope.launch(worker) { recordingParent = model }
+        startGuided(1)
+    }
 
     private fun startGuided(takes: Int) {
         val s = _state.value
@@ -585,9 +611,15 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
                 return@launch
             }
             recordingTakes = takes
-            // A recording asks for the chosen gesture set; a check, for the gestures this model knows.
-            val gestures = if (takes > 0 || h == null) s.recordGestures.gestures
-                else listOf(Gesture.REST) + h.classes.toList().mapNotNull { Gesture.fromId(it) }.filter { it != Gesture.REST }
+            // A new model records the chosen gesture set; a calibration and a check, the gestures of their model.
+            val parent = recordingParent
+            val gestureModel = when {
+                takes == 0 -> h
+                parent != null -> catalog.head(parent)
+                else -> null
+            }
+            val gestures = if (gestureModel == null) s.recordGestures.gestures
+                else listOf(Gesture.REST) + gestureModel.classes.toList().mapNotNull { Gesture.fromId(it) }.filter { it != Gesture.REST }
             check = GuidedCheck(s.model ?: s.person ?: "?", (h?.rmsOver ?: yad.core.RmsOver.TIME).jsonName,
                 // "classes" describes the per-window probabilities, which come from the loaded model (if any).
                 h?.classes ?: gestures.map { it.id }.toIntArray(),
@@ -619,12 +651,15 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
             val user = _state.value.person ?: catalog.userOf(c.model)
             val bytes = c.toBytes()
             val fileName = "rec_${user}_${timestamp()}.bin"
-            catalog.saveRecording(user, fileName, bytes)
+            val file = catalog.saveRecording(user, fileName, bytes)
             val saved = saveToDownloads(fileName, bytes)
-            _state.update { it.copy(checkPrompt = null, checkStep = null, checkStatus = saved, trainingStatus = "Recording done. Preparing…") }
+            _state.update { it.copy(checkPrompt = null, checkStep = null, checkStatus = saved, trainingStatus = "Recording done.") }
             refreshRecordings(user)
             stopRun()
-            viewModelScope.launch(worker) { trainFromRecordings(user, afterNewRecording = true) }
+            val parent = recordingParent
+            val lineage = if (parent == null) yad.core.ModelLineage(user, listOf(file.name))
+                else catalog.lineage(parent).extendedWith(file.name, parent)
+            requestTraining(PendingTraining(lineage, newRecording = file))
             return
         }
         val results = c.results()
@@ -647,53 +682,97 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Retrains the current user's model on their phone recordings (no armband needed). */
+    /** A model waiting to be trained: its lineage, and the recording just made (if any). */
+    private data class PendingTraining(val lineage: yad.core.ModelLineage, val newRecording: java.io.File? = null)
+
+    private var pending: PendingTraining? = null
+
+    /** Trains now if the new model has a name; otherwise asks for one first. */
+    private fun requestTraining(p: PendingTraining) {
+        pending = p
+        if (_state.value.newModelLabel.isBlank()) _state.update { it.copy(askName = true, trainingStatus = "Name the new model to train it.") }
+        else viewModelScope.launch(worker) { trainPending() }
+    }
+
+    /** The answer to "what shall I call the new model?". */
+    fun nameAndTrain(label: String) {
+        if (label.isBlank()) return
+        _state.update { it.copy(newModelLabel = label, askName = false) }
+        viewModelScope.launch(worker) { trainPending() }
+    }
+
+    /** Not training now: the recording stays in the person's folder (engineering view → Retrain/Import to use it). */
+    fun skipTraining() {
+        pending = null
+        _state.update { it.copy(askName = false, trainingStatus = "Not trained. The recording is kept.") }
+    }
+
+    /** Retrains the model in use from its own lineage, as a new model (no armband needed). */
     fun retrain() {
-        val user = _state.value.person ?: return
+        val model = _state.value.model ?: return
         stopRun()
-        viewModelScope.launch(worker) { trainFromRecordings(user, afterNewRecording = false) }
+        requestTraining(PendingTraining(catalog.lineage(model).copy(parent = model)))
     }
 
     private fun trainingStatus(msg: String) = _state.update { it.copy(trainingStatus = msg) }
 
+    /** Worker thread. */
+    private fun trainPending() {
+        val p = pending ?: return
+        pending = null
+        trainLineage(p.lineage, p.newRecording)
+        _state.update { it.copy(newModelLabel = "") }     // the next model gets its own name
+    }
+
     /**
-     * Worker thread: trains [user]'s model from zero on all their phone recordings (not the PC
-     * recording), saves it as a new "<user>-<label>@<time>" version (label from the name field) and selects it.
+     * Worker thread: trains a model from zero on exactly [lineage] — one person's recordings (and
+     * their PC recording for a bundled model's lineage) — saves it as "<person>-<label>@<time>" with
+     * its lineage, and selects it. Nothing from other people or other lineages is used.
      */
-    private fun trainFromRecordings(user: String, afterNewRecording: Boolean) {
+    private fun trainLineage(lineage: yad.core.ModelLineage, newRecording: java.io.File?) {
         val fx = extractor ?: return
+        val user = lineage.person
         try {
-            // Same features as the person's bundled model; people added on the phone use RMS over time.
-            val base = if (catalog.hasBundledModel(user)) catalog.head(user) else null
-            val rmsOver = base?.rmsOver ?: yad.core.RmsOver.TIME
-            val files = catalog.recordings(user)
-            if (files.isEmpty()) { trainingStatus("No recordings for $user yet: tap Record."); return }
+            check(user == _state.value.person) { "this recording belongs to $user, not ${_state.value.person}" }
+            val parent = lineage.parent
+            // Features follow the lineage's parent; a new model follows the person's bundled model, else RMS over time.
+            val rmsOver = parent?.let { catalog.head(it).rmsOver }
+                ?: (if (catalog.hasBundledModel(user)) catalog.head(user).rmsOver else yad.core.RmsOver.TIME)
+            val files = catalog.lineageFiles(lineage)
             val sets = files.mapIndexed { k, f ->
                 recordingFeatures(f, rmsOver, fx) { pct -> trainingStatus("Computing features, recording ${k + 1}/${files.size}: $pct%") }
             }
-            // An honest number, before retraining: the previous phone model on data it has never seen.
-            val previous = catalog.latestPhoneTrained(user)
-            val before = if (afterNewRecording && previous != null && files.size > 1)
-                "${displayName(previous)} scored ${accuracyPercent(catalog.head(previous), sets.last())}% on this new recording. " else ""
-            val data = sets.reduce { a, b -> a + b }
+            val pc = if (lineage.pcData) catalog.pcTrainingData(user)?.takeIf { it.second == rmsOver }?.first else null
+            check(sets.isNotEmpty() || pc != null) { "nothing to train on" }
+            // An honest number: the parent model on the new recording, which it has never seen.
+            val before = if (parent != null && newRecording != null)
+                "${displayName(parent)} scored ${accuracyPercent(catalog.head(parent), sets.last())}% on this calibration. " else ""
+            val phoneData = sets.reduceOrNull { a, b -> a + b }
+            val data = when {
+                pc == null -> phoneData!!
+                phoneData == null -> pc
+                else -> pc + phoneData.weighted(Calibration.newWeight(pc.size, phoneData.size))
+            }
             val t0 = System.nanoTime()
             val result = MlpTrainer(maxIterations = Calibration.ITERATIONS).train(data) { iter, _ ->
-                if (iter % 5 == 0) trainingStatus("Training on ${data.size} windows from ${files.size} recordings: ${iter * 100 / Calibration.ITERATIONS}%")
+                if (iter % 5 == 0) trainingStatus("Training on ${data.size} windows: ${iter * 100 / Calibration.ITERATIONS}%")
                 true
             }
             val secs = (System.nanoTime() - t0) / 1_000_000_000
             val name = yad.core.ModelNames.phoneTrained(user, _state.value.newModelLabel, timestamp())
-            val note = "trained on the phone from zero: ${files.size} recordings (${files.joinToString { it.name }}), " +
-                "${data.size} windows, ${result.iterations} iterations"
-            val names = Gesture.entries.associate { it.id to it.name.lowercase() } + (base?.classNames ?: emptyMap())
+            val from = (if (pc != null) listOf("the PC recording") else emptyList()) + files.map { it.name }
+            val note = "trained on the phone from zero on ${from.size} recordings of $user (${files.joinToString { it.name }})" +
+                (if (pc != null) " + the PC recording" else "") + (parent?.let { ", calibrating $it" } ?: "") +
+                ", ${data.size} windows, ${result.iterations} iterations"
+            val names = Gesture.entries.associate { it.id to it.name.lowercase() }
             val json = result.toHeadJson(name, rmsOver, names, note)
             catalog.saveCalibrated(name, json)
-            // A copy for the PC: tools/analyze_check.py needs it to rerun checks made with this version.
+            catalog.saveLineage(name, lineage)
             saveToDownloads("yad_model_$name.json", json.toByteArray(Charsets.UTF_8))
             _state.update { it.copy(models = catalog.names) }
             loadModel(name)    // also refreshes the person list
-            trainingStatus("✓ Saved ${displayName(name)}: ${files.size} recordings, ${data.size} windows, trained in $secs s. " +
-                before + "Start the armband and run the guided check.")
+            trainingStatus("✓ Saved ${displayName(name)}: ${from.size} recordings, ${data.size} windows, trained in $secs s. " +
+                before + "Run a check to see how well it works.")
         } catch (e: Exception) {
             trainingStatus("Training failed: ${e.message}")
         }
@@ -734,6 +813,7 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(worker) {
             val resolver = getApplication<Application>().contentResolver
             val notes = mutableListOf<String>()
+            val imported = mutableListOf<String>()
             var added = 0
             for (uri in uris) {
                 val name = resolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
@@ -742,14 +822,14 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
                     val bytes = resolver.openInputStream(uri)!!.use { it.readBytes() }
                     GuidedCheck.readSamples(bytes)     // a Yad recording at 500 samples/s, or this throws
                     if (catalog.recordings(user).any { it.name == name }) notes += "$name: already imported"
-                    else { catalog.saveRecording(user, name, bytes); added++ }
+                    else { imported += catalog.saveRecording(user, name, bytes).name; added++ }
                 } catch (e: Exception) {
                     notes += "$name: ${e.message}"
                 }
             }
             refreshRecordings(user)
             trainingStatus("Imported $added for $user. " + notes.joinToString("; "))
-            if (added > 0) trainFromRecordings(user, afterNewRecording = false)
+            if (imported.isNotEmpty()) requestTraining(PendingTraining(yad.core.ModelLineage(user, imported)))
         }
     }
 

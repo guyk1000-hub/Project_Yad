@@ -294,7 +294,7 @@ private fun TrainSection(s: UiState, vm: InferenceViewModel) {
             } else {
                 if (!live) Text("Start the armband (Signal: Armband (live)) to record or check.", style = MaterialTheme.typography.bodySmall)
                 Text("Record: hold each gesture for 10 s, ${Calibration.RECORDING_TAKES} times (~3 min). Quick calibration: once (~1 min). " +
-                    "Afterwards the phone trains $user's model from zero on all of $user's recordings and saves it as a new version.",
+                    "Record starts a new model from that recording alone; Quick calibration builds on the model in use (its recordings + this one). Retrain = the model in use, again, from its own recordings.",
                     style = MaterialTheme.typography.bodySmall)
                 OutlinedTextField(
                     value = s.newModelLabel, onValueChange = vm::setNewModelLabel, singleLine = true,

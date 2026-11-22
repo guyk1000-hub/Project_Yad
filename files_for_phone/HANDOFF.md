@@ -94,6 +94,11 @@ check shows the reaction time. The CNN engine default is 4 threads without XNNPA
 (`ui/UserApp.kt`: welcome + people, Home/Train/Hand/Settings, full-screen guided prompts). People
 added on the phone have no bundled model (`ModelCatalog.people/addPerson/modelFor`). The engineering
 view is behind Settings → "Open the engineering view".
+**0.10.0 (`~/ProjectYad-0.10.0.apk`, untested): model lineages** (`core/ModelLineage.kt`, stored as
+`models/<name>.lineage.json`). A full recording = a new model from that recording alone; Quick
+calibration = the chosen model's lineage + the new recording (same gestures); a bundled PC model's
+lineage = its PC recording (`train_<person>.bin`). Never another person's data (checked). The name
+is required (asked after recording if empty). Home shows the model in use and what it's built from.
 
 **Rule (from the user, 22 Nov): the private repo and the hand's firmware/config are NOT ours to
 change.** Use the hand as it is; report hardware or firmware limits to its maintainers. So, for
