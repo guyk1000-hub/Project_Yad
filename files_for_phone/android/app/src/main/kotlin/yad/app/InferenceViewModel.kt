@@ -38,6 +38,7 @@ import yad.core.GroupAverageDecisionPolicy
 import yad.core.GroupScorer
 import yad.core.HandCommand
 import yad.core.HandModel
+import yad.core.Haifa3dProtocol
 import yad.core.HandPreset
 import yad.core.HandPresets
 import yad.core.PresetAction
@@ -89,6 +90,12 @@ data class UiState(
     val fingerPositions: List<Int> = List(HandModel.CONTROLLER_V2.fingers.size) { 0 },
     val presets: List<HandPreset> = HandPresets.DEFAULTS,
     val presetMessage: String? = null,
+    // old hand (Haifa3D v1) extras
+    val v1Battery: Int? = null,
+    val v1Presets: List<String?> = List(Haifa3dProtocol.PRESETS) { null },
+    val v1Config: Map<Int, Int?> = emptyMap(),
+    val v1Movements: List<Haifa3dProtocol.Movement> = emptyList(),
+    val v1Message: String? = null,
     val realHand: Boolean = false,
     val handState: String = "simulated",
     val simulatedPosition: HandCommand? = null,
@@ -153,6 +160,7 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
     )
     private val prefs = app.getSharedPreferences("yad", android.content.Context.MODE_PRIVATE)
     private val realHand: HandDriver get() = drivers.getValue(_state.value.handModel)
+    private val oldHand get() = drivers.getValue(HandModel.HAIFA3D_V1) as Haifa3dBleHand
     private val receiver = ArmbandReceiver(app)
     private val gate = CommandGate()
 
@@ -201,6 +209,7 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { receiver.status.collect { st -> _state.update { it.copy(armband = st) } } }
         val savedModel = prefs.getString(PREF_HAND, null)?.let { n -> HandModel.entries.firstOrNull { it.name == n } }
         if (savedModel != null) _state.update { it.copy(handModel = savedModel) }
+        viewModelScope.launch { oldHand.battery.collect { b -> _state.update { it.copy(v1Battery = b) } } }
         prefs.getString(PREF_PRESETS, null)?.let { text ->
             runCatching { HandPresets.fromJson(text) }.onSuccess { p -> _state.update { it.copy(presets = p) } }
         }
@@ -694,6 +703,114 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
     }
+
+    // ---- old hand (Haifa3D v1): everything its own app offers ---------------------------
+
+    private fun v1Message(msg: String) = _state.update { it.copy(v1Message = msg) }
+
+    /** Runs [what] on the real old hand, or logs it as simulated; reports failures. */
+    private suspend fun onOldHand(source: String, what: String, block: suspend (Haifa3dBleHand) -> Unit) {
+        if (!_state.value.realHand) return log(source, what, "simulated")
+        try {
+            block(oldHand)
+            log(source, what, "sent to hand")
+        } catch (e: Exception) {
+            log(source, what, "NOT sent: ${e.message}")
+        }
+    }
+
+    /** Reads from the real old hand; needs it connected. */
+    private fun readOldHand(block: suspend (Haifa3dBleHand) -> Unit) {
+        if (!_state.value.realHand) return v1Message("Turn on Real hand first: these are read from the hand.")
+        viewModelScope.launch(Dispatchers.Default) {
+            try { block(oldHand) } catch (e: Exception) { v1Message("Couldn't read: ${e.message}") }
+        }
+    }
+
+    // Live control, as the Haifa3D app does it: while a button is held, a 50 ms step every 40 ms.
+    private val held = java.util.concurrent.ConcurrentHashMap<Haifa3dProtocol.Motor, Boolean>()
+    private var liveJob: Job? = null
+
+    fun v1Hold(motor: Haifa3dProtocol.Motor, closing: Boolean) {
+        held[motor] = closing
+        if (liveJob?.isActive == true) return
+        val what = "live ${motor.title} ${if (motor == Haifa3dProtocol.Motor.TURN) (if (closing) "left" else "right") else (if (closing) "close" else "open")}"
+        liveJob = viewModelScope.launch(Dispatchers.Default) {
+            if (!_state.value.realHand) { log("manual", what, "simulated"); return@launch }
+            log("manual", what, "held")
+            while (held.isNotEmpty()) {
+                try { oldHand.execute(Haifa3dProtocol.liveStep(HashMap(held))) } catch (e: Exception) { log("manual", what, "NOT sent: ${e.message}"); break }
+                delay(40)
+            }
+        }
+    }
+
+    fun v1Release(motor: Haifa3dProtocol.Motor) { held.remove(motor) }
+
+    fun v1SetMovements(list: List<Haifa3dProtocol.Movement>) = _state.update { it.copy(v1Movements = list) }
+
+    fun v1RunMovements() {
+        val m = _state.value.v1Movements
+        if (m.isEmpty()) return v1Message("Add a movement first.")
+        viewModelScope.launch(Dispatchers.Default) { onOldHand("manual", "action (${m.size} movements)") { it.execute(Haifa3dProtocol.action(m)) } }
+    }
+
+    fun v1TriggerPreset(n: Int) {
+        viewModelScope.launch(Dispatchers.Default) { onOldHand("manual", "preset #$n") { it.triggerPreset(n) } }
+    }
+
+    fun v1ReadPresets() = readOldHand { h ->
+        val out = (0 until Haifa3dProtocol.PRESETS).map { n ->
+            val bytes = h.readPreset(n)
+            val moves = bytes?.let { Haifa3dProtocol.decodeAction(it) }
+            when {
+                bytes == null -> "(couldn't read)"
+                moves == null -> "(empty)"
+                else -> moves.joinToString(" → ") { it.describe() }
+            }
+        }
+        _state.update { it.copy(v1Presets = out, v1Message = "Read ${out.size} presets from the hand.") }
+    }
+
+    /** Puts preset [n] from the hand into the action builder, to run or change it. */
+    fun v1LoadPreset(n: Int) = readOldHand { h ->
+        val moves = h.readPreset(n)?.let { Haifa3dProtocol.decodeAction(it) }
+        if (moves == null) v1Message("Preset #$n is empty or unreadable.")
+        else _state.update { it.copy(v1Movements = moves, v1Message = "Preset #$n loaded into the action builder.") }
+    }
+
+    /** Stores the action builder's movements as preset [n] on the hand. */
+    fun v1SavePreset(n: Int) {
+        val m = _state.value.v1Movements
+        if (m.isEmpty()) return v1Message("Add a movement first.")
+        readOldHand { h ->
+            h.writePreset(n, Haifa3dProtocol.action(m))
+            _state.update { s -> s.copy(v1Presets = s.v1Presets.toMutableList().also { it[n] = m.joinToString(" → ") { x -> x.describe() } },
+                v1Message = "Saved as preset #$n on the hand.") }
+        }
+    }
+
+    fun v1ReadConfig() = readOldHand { h ->
+        val values = Haifa3dProtocol.CONFIG.associate { it.id to runCatching { h.readConfig(it.id) }.getOrNull() }
+        _state.update { it.copy(v1Config = values, v1Message = "Configuration read from the hand.") }
+    }
+
+    fun v1WriteConfig(id: Int, value: Int) {
+        if (value !in 0..255) return v1Message("Values are 0..255.")
+        readOldHand { h ->
+            h.writeConfig(id, value)
+            val back = h.readConfig(id)
+            _state.update { it.copy(v1Config = it.v1Config + (id to back), v1Message = "Set ${Haifa3dProtocol.CONFIG.first { c -> c.id == id }.short} = $back") }
+        }
+    }
+
+    /** [which] 0 = presets, 1 = configuration, back to factory defaults. */
+    fun v1Reset(which: Int) = readOldHand { h ->
+        h.reset(which)
+        v1Message(if (which == 0) "Presets reset to factory defaults." else "Configuration reset to factory defaults.")
+    }
+
+    fun v1ReadBattery() = readOldHand { h -> h.readBattery() }
 
     /** For hands with a speed: remembered, and sent to the real hand when connected. */
     fun setHandSpeed(value: Int) {

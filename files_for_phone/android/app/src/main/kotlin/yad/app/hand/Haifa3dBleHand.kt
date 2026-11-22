@@ -41,6 +41,11 @@ class Haifa3dBleHand(private val context: Context, val address: String = Haifa3d
     private var characteristic: BluetoothGattCharacteristic? = null
     private var pendingConnect: CompletableDeferred<Boolean>? = null
     private var pendingWrite: CompletableDeferred<Int>? = null
+    private var pendingRead: CompletableDeferred<ByteArray?>? = null
+
+    /** Battery level in %, read when connected and on request (null = unknown). */
+    private val _battery = MutableStateFlow<Int?>(null)
+    val battery: StateFlow<Int?> = _battery
 
     private val callback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
@@ -51,6 +56,8 @@ class Haifa3dBleHand(private val context: Context, val address: String = Haifa3d
                 characteristic = null
                 pendingConnect?.complete(false)
                 pendingWrite?.complete(-1)
+                pendingRead?.complete(null)
+                _battery.value = null
                 if (_state.value == HandState.Ready) _state.value = HandState.Failed("connection lost (status $status)")
             }
         }
@@ -63,6 +70,10 @@ class Haifa3dBleHand(private val context: Context, val address: String = Haifa3d
 
         override fun onCharacteristicWrite(g: BluetoothGatt, c: BluetoothGattCharacteristic, status: Int) {
             pendingWrite?.complete(status)
+        }
+
+        override fun onCharacteristicRead(g: BluetoothGatt, c: BluetoothGattCharacteristic, value: ByteArray, status: Int) {
+            pendingRead?.complete(if (status == BluetoothGatt.GATT_SUCCESS) value else null)
         }
     }
 
@@ -92,6 +103,7 @@ class Haifa3dBleHand(private val context: Context, val address: String = Haifa3d
         val ok = withTimeoutOrNull(CONNECT_TIMEOUT_MS) { done.await() } == true
         if (ok) {
             _state.value = HandState.Ready
+            runCatching { readBattery() }
         } else {
             gatt?.close()
             gatt = null
@@ -120,18 +132,55 @@ class Haifa3dBleHand(private val context: Context, val address: String = Haifa3d
     }
 
     /** Sends one command; throws if the hand isn't connected or the write fails. */
-    override suspend fun send(command: HandCommand) = writeLock.withLock {
+    override suspend fun send(command: HandCommand) =
+        write(Haifa3dProtocol.DIRECT_EXECUTE_UUID, checkNotNull(Haifa3dProtocol.encode(command)) { "the old hand can't do $command" })
+
+    /** Runs an action now (Haifa3dProtocol.action / liveStep bytes). */
+    suspend fun execute(action: ByteArray) = write(Haifa3dProtocol.DIRECT_EXECUTE_UUID, action)
+
+    /** Runs preset [n] (0..11) stored on the hand. */
+    suspend fun triggerPreset(n: Int) = write(Haifa3dProtocol.TRIGGER_UUID, byteArrayOf(n.toByte()))
+
+    suspend fun readPreset(n: Int): ByteArray? = read(Haifa3dProtocol.presetUuid(n))
+
+    suspend fun writePreset(n: Int, action: ByteArray) = write(Haifa3dProtocol.presetUuid(n), action)
+
+    suspend fun readConfig(id: Int): Int? = read(Haifa3dProtocol.configUuid(id))?.firstOrNull()?.toInt()?.and(0xFF)
+
+    suspend fun writeConfig(id: Int, value: Int) = write(Haifa3dProtocol.configUuid(id), byteArrayOf(value.toByte()))
+
+    /** [which] 0 = reset the presets, 1 = reset the configuration, to factory defaults. */
+    suspend fun reset(which: Int) = write(Haifa3dProtocol.configResetUuid(which), byteArrayOf(1))
+
+    suspend fun readBattery(): Int? =
+        read(Haifa3dProtocol.BATTERY_LEVEL_UUID)?.firstOrNull()?.toInt()?.and(0xFF).also { _battery.value = it }
+
+    private fun find(uuid: String): BluetoothGattCharacteristic {
         val g = gatt
-        val c = characteristic
-        check(_state.value == HandState.Ready && g != null && c != null) { "hand not connected" }
+        check(_state.value == HandState.Ready && g != null) { "hand not connected" }
+        val u = UUID.fromString(uuid)
+        return checkNotNull(g.services.firstNotNullOfOrNull { it.getCharacteristic(u) }) { "this hand doesn't offer $uuid" }
+    }
+
+    private suspend fun write(uuid: String, bytes: ByteArray) = writeLock.withLock {
+        val c = find(uuid)
+        val g = gatt!!
         val withResponse = c.properties and BluetoothGattCharacteristic.PROPERTY_WRITE != 0
         val type = if (withResponse) BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT else BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
         val done = CompletableDeferred<Int>()
         pendingWrite = done
-        val rc = g.writeCharacteristic(c, checkNotNull(Haifa3dProtocol.encode(command)) { "the old hand can't do $command" }, type)
+        val rc = g.writeCharacteristic(c, bytes, type)
         check(rc == 0) { "write rejected (code $rc)" }   // BluetoothStatusCodes.SUCCESS
         val status = withTimeoutOrNull(WRITE_TIMEOUT_MS) { done.await() }
         check(status == null && !withResponse || status == BluetoothGatt.GATT_SUCCESS) { "write failed (status $status)" }
+    }
+
+    private suspend fun read(uuid: String): ByteArray? = writeLock.withLock {
+        val c = find(uuid)
+        val done = CompletableDeferred<ByteArray?>()
+        pendingRead = done
+        check(gatt!!.readCharacteristic(c)) { "read rejected" }
+        withTimeoutOrNull(WRITE_TIMEOUT_MS) { done.await() }
     }
 
     override fun disconnect() {

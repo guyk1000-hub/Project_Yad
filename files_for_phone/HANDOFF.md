@@ -80,6 +80,11 @@ commands are logged, not sent. Needs BLUETOOTH_ADVERTISE.
 function of their manager app that the hand runs: whole-hand buttons, speed, a position per finger
 (`[6, finger, %]`), and presets (`core/HandPresets.kt`, stored in prefs, import/export JSON).
 Placeholders for what the hand ignores. Their APK was read with `dexdump`; details in REPORT_NOTES.
+**0.7.2 (`~/ProjectYad-0.7.2.apk`, untested):** the old-hand panel (`ui/OldHandPanel.kt`) with all of
+the Haifa3D app's functions: live hold-to-move, an action builder, 12 presets on the hand
+(read/edit/save/run), configuration values + resets, battery (driver: `Haifa3dBleHand`; encoding:
+`core/Hand.kt` `Haifa3dProtocol`).
+**The current UI is the ENGINEERING view.** The user plans a separate, easy end-user view later.
 
 **Rule (from the user, 22 Nov): the private repo and the hand's firmware/config are NOT ours to
 change.** Use the hand as it is; report hardware or firmware limits to its maintainers. So, for

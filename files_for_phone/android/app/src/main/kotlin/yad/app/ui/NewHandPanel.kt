@@ -53,9 +53,9 @@ import yad.core.HandPresets
 import yad.core.PresetAction
 import kotlin.math.roundToInt
 
-private val Connected = Color(0xFF2E7D32)
-private val Waiting = Color(0xFFFFA000)
-private val Danger = Color(0xFFC62828)
+internal val Connected = Color(0xFF2E7D32)
+internal val Waiting = Color(0xFFFFA000)
+internal val Danger = Color(0xFFC62828)
 
 /**
  * Controls for the new hand (controller v2): everything its own manager app offers that the hand's
@@ -76,7 +76,7 @@ fun NewHandPanel(s: UiState, vm: InferenceViewModel) {
                 StatusPill(s)
             }
 
-            Section("Whole hand") {
+            PanelSection("Whole hand") {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Button(onClick = { vm.manual(HandCommand.OPEN) }, Modifier.weight(1f).height(60.dp)) { Text("OPEN", fontSize = 20.sp) }
                     Button(onClick = { vm.manual(HandCommand.CLOSE) }, Modifier.weight(1f).height(60.dp)) { Text("CLOSE", fontSize = 20.sp) }
@@ -93,7 +93,7 @@ fun NewHandPanel(s: UiState, vm: InferenceViewModel) {
 
             model.speedRange?.let { range ->
                 var speed by remember(model) { mutableStateOf(s.handSpeed.toFloat()) }
-                Section("Speed  ${speed.roundToInt()}") {
+                PanelSection("Speed  ${speed.roundToInt()}") {
                     Slider(
                         value = speed, onValueChange = { speed = it },
                         valueRange = range.first.toFloat()..range.last.toFloat(), steps = (range.last - range.first) / 10 - 1,
@@ -103,7 +103,7 @@ fun NewHandPanel(s: UiState, vm: InferenceViewModel) {
             }
 
             if (model.fingers.isNotEmpty()) {
-                Section("Fingers   0% open · 100% closed") {
+                PanelSection("Fingers   0% open · 100% closed") {
                     model.fingers.forEachIndexed { i, name ->
                         var pos by remember(model) { mutableStateOf(s.fingerPositions.getOrElse(i) { 0 }.toFloat()) }
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -119,7 +119,7 @@ fun NewHandPanel(s: UiState, vm: InferenceViewModel) {
                 }
             }
 
-            Section("Presets") {
+            PanelSection("Presets") {
                 s.presets.withIndex().chunked(2).forEach { pair ->
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         pair.forEach { (i, p) ->
@@ -140,7 +140,7 @@ fun NewHandPanel(s: UiState, vm: InferenceViewModel) {
             }
 
             if (model.notYetSupported.isNotEmpty()) {
-                Section("Not supported by this hand yet") {
+                PanelSection("Not supported by this hand yet") {
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         model.notYetSupported.forEach { AssistChip(onClick = {}, enabled = false, label = { Text(it) }) }
                     }
@@ -174,7 +174,7 @@ fun NewHandPanel(s: UiState, vm: InferenceViewModel) {
 }
 
 @Composable
-private fun Section(title: String, content: @Composable () -> Unit) {
+internal fun PanelSection(title: String, content: @Composable () -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(title, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
         content()
@@ -182,7 +182,7 @@ private fun Section(title: String, content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun StatusPill(s: UiState) {
+internal fun StatusPill(s: UiState) {
     val (text, color) = when {
         !s.realHand -> "simulated" to Color.Gray
         s.handState == "connected" -> "connected" to Connected

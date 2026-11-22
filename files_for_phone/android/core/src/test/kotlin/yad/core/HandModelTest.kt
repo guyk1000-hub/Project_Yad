@@ -60,3 +60,39 @@ class HandPresetsTest {
         assertFailsWith<IllegalArgumentException> { HandPresets.fromJson("""[{"name":"x","actions":[{"type":"finger","finger":9,"percent":10}]}]""") }
     }
 }
+
+class Haifa3dV1Test {
+    private val P = Haifa3dProtocol
+
+    @Test
+    fun `the four Pi commands come out byte for byte the same`() {
+        // files_for_pi/protocol.py: [5] + [torque, time, motors, direction]
+        assertContentEquals(byteArrayOf(5, 0b11111000.toByte(), 20, 0b01111000, 0), P.encode(HandCommand.OPEN))
+        assertContentEquals(byteArrayOf(5, 0b11111000.toByte(), 20, 0b01111000, 0b11111000.toByte()), P.encode(HandCommand.CLOSE))
+        assertContentEquals(byteArrayOf(5, 0b11111000.toByte(), 20, 0b10000000.toByte(), 0b10000000.toByte()), P.encode(HandCommand.LEFT))
+        assertContentEquals(byteArrayOf(5, 0b11111000.toByte(), 20, 0b10000000.toByte(), 0), P.encode(HandCommand.RIGHT))
+    }
+
+    @Test
+    fun `actions with several movements round trip`() {
+        val tap = listOf(
+            Haifa3dProtocol.Movement(setOf(Haifa3dProtocol.Motor.FINGER1), setOf(Haifa3dProtocol.Motor.FINGER1), emptySet(), 6),
+            Haifa3dProtocol.Movement(setOf(Haifa3dProtocol.Motor.FINGER1), emptySet(), emptySet(), 6),
+        )
+        val bytes = P.action(tap)
+        assertEquals(9, bytes.size)
+        assertEquals(9, bytes[0].toInt())
+        assertEquals(tap, P.decodeAction(bytes))
+        assertNull(P.decodeAction(byteArrayOf(1, 2, 3)))
+    }
+
+    @Test
+    fun `uuids and live control`() {
+        assertEquals("e0198001-7544-42c1-100b-b24344b6aa70", P.presetUuid(11))
+        assertEquals("e0198003-7544-42c1-1013-b24344b6aa70", P.configUuid(19))
+        assertEquals("e0198003-7544-42c1-0101-b24344b6aa70", P.configResetUuid(1))
+        // finger 2 closing, wrist right: 1 unit, low torque
+        val live = P.liveStep(mapOf(Haifa3dProtocol.Motor.FINGER2 to true, Haifa3dProtocol.Motor.TURN to false))
+        assertContentEquals(byteArrayOf(5, 0, 1, 0b10100000.toByte(), 0b00100000), live)
+    }
+}

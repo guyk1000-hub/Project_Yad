@@ -86,7 +86,7 @@ fun InferenceScreen(vm: InferenceViewModel) {
         GestureCard(s)
         StopButton(s.stopped, vm::toggleStop)
         HandPicker(s, vm::selectHandModel)
-        if (s.handModel == HandModel.CONTROLLER_V2) NewHandPanel(s, vm) else ManualButtons(s, vm::manual)
+        if (s.handModel == HandModel.CONTROLLER_V2) NewHandPanel(s, vm) else OldHandPanel(s, vm)
         HandSection(s, vm::setRealHand)
         RunControls(s, onStart = vm::start, onStop = vm::stopRun, onRealTime = vm::setRealTime)
         TrainSection(s, vm)
@@ -162,16 +162,6 @@ private fun HandPicker(s: UiState, onSelect: (HandModel) -> Unit) {
     if (s.handModel == HandModel.CONTROLLER_V2) {
         Text("No wrist on this hand: LEFT / RIGHT gestures send nothing. To connect: turn on Real hand, " +
             "then turn the hand on (or restart it); it finds the phone by itself.", style = MaterialTheme.typography.bodySmall)
-    }
-}
-
-@Composable
-private fun ManualButtons(s: UiState, onCommand: (HandCommand) -> Unit) {
-    Text("Manual (always works, even when stopped)", style = MaterialTheme.typography.labelMedium)
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        s.handModel.commands.forEach { cmd ->
-            OutlinedButton(onClick = { onCommand(cmd) }) { Text(cmd.title) }
-        }
     }
 }
 

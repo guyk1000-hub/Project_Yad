@@ -279,6 +279,20 @@ with `dexdump`: no source in the repo) offers, as far as the hand's code runs it
 | Direct Commands (8 editable presets, JSON load / save / share, defaults) | special codes | ignored | presets made of position / open / close, which the hand runs; editable, import / export JSON, defaults |
 | Subscribe, specials, "Packet" (`0xF0`), "Screen packet" (`0xF4`) | — | ignored | shown as "not supported yet" |
 
+0.7.2: the old hand gets everything the Haifa3D app offers (its public source and Protocol.md):
+
+| Haifa3D app | BLE | In our app |
+|---|---|---|
+| Live control (hold a button: a 50 ms low-torque step every 40 ms) | direct execute | hold-to-move per motor (wrist, fingers 1–4) |
+| Actions = movements (motors, direction, torque low/high, time × 50 ms) | direct execute `[1+4n, …]` | action builder (add / edit / delete movements, run) |
+| 12 presets stored on the hand: read, edit, write, trigger | preset + trigger services | read all, edit in the builder, save to a slot, run |
+| Configuration values (torque thresholds, slopes, filter, factors, unit, debug) + factory resets | configuration service | read / set each value, reset presets / configuration (with confirmation) |
+| Battery level | standard battery service | read when connected and on tap |
+| Voice commands ("speak to action") | — | placeholder |
+
+The old encoder is now general (`Haifa3dProtocol.action`), and the Pi's four commands still come
+out byte for byte the same (unit test, plus the golden test against `protocol.py`).
+
 ## Decisions log
 
 | Date | Decision | Why |
@@ -296,6 +310,7 @@ with `dexdump`: no source in the repo) offers, as far as the hand's code runs it
 | 2026-11-15 | Bench every latency idea offline first (`tools/bench.py`) | Latency vs wrong moves is a trade-off: measure it |
 | 2026-11-22 | The new hand and its code are used as they are (not ours to change) | The user: not up to them |
 | 2026-11-22 | The app supports both hands, switched by hand; each offers only what it supports | The new hand isn't complete; the project must still finish |
+| 2026-11-22 | Today's screens are the engineering view; an easy end-user view comes later | The user's plan |
 | 2026-11-15 | Train on the phone (own L-BFGS), not on the PC | No PC round trip each session; matches sklearn offline |
 
 ## Ethics notes (to expand)
