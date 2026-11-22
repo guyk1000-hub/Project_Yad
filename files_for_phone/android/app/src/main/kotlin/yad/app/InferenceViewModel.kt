@@ -39,6 +39,7 @@ import yad.core.AgreeDecisionPolicy
 import yad.core.GroupScorer
 import yad.core.HandCommand
 import yad.core.HandModel
+import yad.core.GestureSet
 import yad.core.Haifa3dProtocol
 import yad.core.HandPreset
 import yad.core.HandPresets
@@ -122,6 +123,7 @@ data class UiState(
     val trainingStatus: String? = null,
     val recordings: List<RecordingInfo> = emptyList(),
     val newModelLabel: String = "",
+    val recordGestures: GestureSet = GestureSet.BASIC,
 ) {
     val decisionEveryMs: Int get() = if (decisionMode == DecisionMode.FAST) fastHopMs else groupSize * WINDOW_MS
 
@@ -485,9 +487,13 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(worker) {
             val h = head ?: return@launch
             recordingTakes = takes
-            check = GuidedCheck(s.model ?: "?", h.rmsOver.jsonName, h.classes,
+            // A recording asks for the chosen gesture set; a check, for the gestures this model knows.
+            val gestures = if (takes > 0) s.recordGestures.gestures
+                else listOf(Gesture.REST) + h.classes.toList().mapNotNull { Gesture.fromId(it) }.filter { it != Gesture.REST }
+            check = GuidedCheck(s.model ?: "?", h.rmsOver.jsonName,
+                if (takes > 0) gestures.map { it.id }.toIntArray() else h.classes,
                 phaseSeconds = if (takes > 0) Calibration.PHASE_SECONDS else GuidedCheck.PHASE_SECONDS,
-                takes = maxOf(takes, 1))
+                takes = maxOf(takes, 1), gestures = gestures)
             _state.update { it.copy(checkResults = emptyList(), checkStatus = null, trainingStatus = null) }
         }
     }
@@ -524,6 +530,7 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setNewModelLabel(label: String) = _state.update { it.copy(newModelLabel = label) }
+    fun setRecordGestures(set: GestureSet) = _state.update { it.copy(recordGestures = set) }
 
     /** Retrains the current user's model on their phone recordings (no armband needed). */
     fun retrain() {
@@ -561,7 +568,8 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
             val name = yad.core.ModelNames.phoneTrained(user, _state.value.newModelLabel, timestamp())
             val note = "trained on the phone from zero: ${files.size} recordings (${files.joinToString { it.name }}), " +
                 "${data.size} windows, ${result.iterations} iterations"
-            val json = result.toHeadJson(name, base.rmsOver, base.classNames, note)
+            val names = Gesture.entries.associate { it.id to it.name.lowercase() } + base.classNames
+            val json = result.toHeadJson(name, base.rmsOver, names, note)
             catalog.saveCalibrated(name, json)
             // A copy for the PC: tools/analyze_check.py needs it to rerun checks made with this version.
             saveToDownloads("yad_model_$name.json", json.toByteArray(Charsets.UTF_8))

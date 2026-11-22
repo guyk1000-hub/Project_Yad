@@ -18,6 +18,8 @@ class GuidedCheck(
     val sampleRate: Int = 500,
     val phaseSeconds: Int = PHASE_SECONDS,
     val takes: Int = 1,
+    /** The gestures to hold, in order (REST first). */
+    val gestures: List<Gesture> = GESTURES,
 ) {
     data class Phase(val label: Int, val title: String, val seconds: Int)
 
@@ -25,7 +27,7 @@ class GuidedCheck(
         (1..takes).flatMap { t ->
             val tag = if (takes > 1) " (take $t/$takes)" else ""
             (if (t > 1) listOf(Phase(-1, "Relax your arm", BREAK_SECONDS)) else emptyList()) +
-                GESTURES.map { Phase(it.id, it.name + tag, phaseSeconds) }
+                gestures.map { Phase(it.id, it.name + tag, phaseSeconds) }
         }
 
     private val labels = ByteArrayOutputStream()
@@ -99,7 +101,7 @@ class GuidedCheck(
     }
 
     /** One line per gesture: accuracy and the most common wrong answer. */
-    fun results(): List<String> = GESTURES.map { g ->
+    fun results(): List<String> = gestures.map { g ->
         val n = scored[g.id] ?: 0
         val ok = correct[g.id] ?: 0
         val confusion = wrong[g.id]?.maxByOrNull { it.value }?.let { (cls, k) ->
@@ -114,7 +116,7 @@ class GuidedCheck(
         if (r.isEmpty()) return listOf("Reaction: no right decisions yet")
         val sorted = r.map { it.second }.sorted()
         val median = if (sorted.size % 2 == 1) sorted[sorted.size / 2] else (sorted[sorted.size / 2 - 1] + sorted[sorted.size / 2]) / 2
-        val missed = GESTURES.count { it != Gesture.REST } - r.size
+        val missed = gestures.count { it != Gesture.REST } - r.size
         return listOf("Reaction (cue → first right decision): " + r.joinToString(", ") { "${it.first.name} ${it.second} ms" } +
             " · median $median ms" + if (missed > 0) " · $missed gestures never decided" else "")
     }
@@ -141,7 +143,7 @@ class GuidedCheck(
     }
 
     companion object {
-        val GESTURES = listOf(Gesture.REST, Gesture.CLOSE, Gesture.OPEN, Gesture.RIGHT, Gesture.LEFT)
+        val GESTURES = GestureSet.BASIC.gestures
         const val PHASE_SECONDS = 6
         const val READY_SECONDS = 3
         const val BREAK_SECONDS = 5

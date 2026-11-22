@@ -166,8 +166,9 @@ class HandControllerV2Hand(private val context: Context) : HandDriver {
         manager?.adapter?.bluetoothLeAdvertiser?.stopAdvertising(advertiseCallback)
     }
 
-    override suspend fun send(command: HandCommand) =
-        notify(checkNotNull(HandControllerV2Protocol.encode(command)) { "the new hand can't do $command" })
+    override suspend fun send(command: HandCommand) {
+        for (m in checkNotNull(HandControllerV2Protocol.messages(command)) { "the new hand can't do $command" }) notify(m)
+    }
 
     override suspend fun setSpeed(value: Int) = notify(HandControllerV2Protocol.speed(value))
 

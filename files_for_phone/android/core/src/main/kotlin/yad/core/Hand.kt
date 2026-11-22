@@ -2,9 +2,18 @@ package yad.core
 
 import kotlinx.serialization.Serializable
 
-/** Class ids used by every model (files_for_pi/realtime_pi_classify.py GESTURE_MAP). */
-enum class Gesture(val id: Int) {
-    REST(0), CLOSE(1), OPEN(2), RIGHT(3), LEFT(4);
+/**
+ * Class ids used by every model: 0–4 as files_for_pi/realtime_pi_classify.py GESTURE_MAP, then the
+ * finger gestures, which only models trained on the "with fingers" gesture set know.
+ */
+enum class Gesture(val id: Int, val prompt: String) {
+    REST(0, "Relax your hand"),
+    CLOSE(1, "Make a fist"),
+    OPEN(2, "Open your hand wide"),
+    RIGHT(3, "Turn your wrist right"),
+    LEFT(4, "Turn your wrist left"),
+    POINT(5, "Point with your index finger"),
+    PEACE(6, "Peace sign: index and middle finger up");
 
     /** What the hand should do for this gesture; REST sends nothing, like the Pi. */
     val command: HandCommand?
@@ -14,6 +23,8 @@ enum class Gesture(val id: Int) {
             OPEN -> HandCommand.OPEN
             RIGHT -> HandCommand.RIGHT
             LEFT -> HandCommand.LEFT
+            POINT -> HandCommand.POINT
+            PEACE -> HandCommand.PEACE
         }
 
     companion object {
@@ -26,6 +37,15 @@ enum class Gesture(val id: Int) {
 enum class HandCommand(val title: String) {
     OPEN("OPEN"), CLOSE("CLOSE"), LEFT("LEFT"), RIGHT("RIGHT"),
     STOP("STOP"), STEP("CLOSE A BIT"), CALIBRATE("CALIBRATE"),
+
+    /** Absolute poses: every finger is driven to its place, so the result is the same from open or closed. */
+    POINT("POINT"), PEACE("PEACE"),
+}
+
+/** Which gestures a recording asks for (and so which a model trained on it knows). */
+enum class GestureSet(val title: String, val gestures: List<Gesture>) {
+    BASIC("Hand (5 gestures)", listOf(Gesture.REST, Gesture.CLOSE, Gesture.OPEN, Gesture.RIGHT, Gesture.LEFT)),
+    FINGERS("Hand + fingers (7)", BASIC.gestures + listOf(Gesture.POINT, Gesture.PEACE)),
 }
 
 /**
@@ -42,10 +62,13 @@ enum class HandModel(
     /** What the hand's own manager app offers but this hand's code ignores: shown, not sent. */
     val notYetSupported: List<String> = emptyList(),
 ) {
-    HAIFA3D_V1("Old hand (Haifa3D v1)", listOf(HandCommand.OPEN, HandCommand.CLOSE, HandCommand.LEFT, HandCommand.RIGHT), null, 0),
+    HAIFA3D_V1(
+        "Old hand (Haifa3D v1)",
+        listOf(HandCommand.OPEN, HandCommand.CLOSE, HandCommand.LEFT, HandCommand.RIGHT, HandCommand.POINT, HandCommand.PEACE), null, 0,
+    ),
     CONTROLLER_V2(
         "New hand (controller v2)",
-        listOf(HandCommand.OPEN, HandCommand.CLOSE, HandCommand.STOP, HandCommand.STEP, HandCommand.CALIBRATE),
+        listOf(HandCommand.OPEN, HandCommand.CLOSE, HandCommand.POINT, HandCommand.PEACE, HandCommand.STOP, HandCommand.STEP, HandCommand.CALIBRATE),
         HandControllerV2Protocol.SPEED_RANGE, HandControllerV2Protocol.DEFAULT_SPEED,
         fingers = listOf("Index", "Middle", "Ring", "Pinky"),
         notYetSupported = listOf("Wrist (LEFT / RIGHT)", "Subscribe", "Special commands 1–8", "Packet", "Screen packet"),
@@ -149,6 +172,9 @@ object Haifa3dProtocol {
         HandCommand.CLOSE -> action(listOf(Movement(FINGERS, ALL, ALL, 20)))   // the Pi also sets the (unused) wrist direction bit
         HandCommand.LEFT -> action(listOf(Movement(setOf(Motor.TURN), setOf(Motor.TURN), ALL, 20)))
         HandCommand.RIGHT -> action(listOf(Movement(setOf(Motor.TURN), emptySet(), ALL, 20)))
+        // One movement, every finger driven to its end stop in its own direction: same pose from open or closed.
+        HandCommand.POINT -> action(listOf(Movement(FINGERS, setOf(Motor.FINGER2, Motor.FINGER3, Motor.FINGER4), ALL, 20)))
+        HandCommand.PEACE -> action(listOf(Movement(FINGERS, setOf(Motor.FINGER3, Motor.FINGER4), ALL, 20)))
         else -> null
     }
 
@@ -208,7 +234,18 @@ object HandControllerV2Protocol {
         HandCommand.STEP -> message(STEP)
         HandCommand.CALIBRATE -> message(CALIBRATE)
         HandCommand.LEFT, HandCommand.RIGHT -> null    // no wrist on this hand
+        HandCommand.POINT, HandCommand.PEACE -> null   // several messages: see messages()
     }
+
+    /** Everything to send for [command], in order; null if this hand can't do it. Poses set every finger. */
+    fun messages(command: HandCommand): List<ByteArray>? = when (command) {
+        HandCommand.POINT -> pose(0, 100, 100, 100)
+        HandCommand.PEACE -> pose(0, 0, 100, 100)
+        else -> encode(command)?.let { listOf(it) }
+    }
+
+    /** Positions for fingers 1..4 (index, middle, ring, pinky), 0 = open, 100 = closed. */
+    private fun pose(vararg percent: Int) = percent.mapIndexed { i, p -> position(i + 1, p) }
 
     /** One finger (1 = M1 … 4 = M4) to [percent] of its travel, 0 = open, 100 = closed. */
     fun position(finger: Int, percent: Int): ByteArray {

@@ -82,6 +82,10 @@ fun OldHandPanel(s: UiState, vm: InferenceViewModel) {
                     FilledTonalButton(onClick = { vm.manual(HandCommand.LEFT) }, Modifier.weight(1f)) { Text("◀ Wrist left") }
                     FilledTonalButton(onClick = { vm.manual(HandCommand.RIGHT) }, Modifier.weight(1f)) { Text("Wrist right ▶") }
                 }
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    FilledTonalButton(onClick = { vm.manual(HandCommand.POINT) }, Modifier.weight(1f)) { Text("☝ Point") }
+                    FilledTonalButton(onClick = { vm.manual(HandCommand.PEACE) }, Modifier.weight(1f)) { Text("✌ Peace") }
+                }
             }
 
             PanelSection("Live control — hold to move") {

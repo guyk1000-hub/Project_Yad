@@ -58,6 +58,7 @@ import yad.app.Source
 import yad.app.UiState
 import yad.app.displayName
 import yad.core.Calibration
+import yad.core.GestureSet
 import yad.core.HandCommand
 import yad.core.HandModel
 import yad.core.ModelNames
@@ -297,6 +298,12 @@ private fun TrainSection(s: UiState, vm: InferenceViewModel) {
                     label = { Text("Name for the new model (optional)") },
                     supportingText = { Text("Saved as \"$user · ${ModelNames.cleanLabel(s.newModelLabel)} · <date time>\"; existing models are never replaced") },
                 )
+                Text("Gestures to record", style = MaterialTheme.typography.labelMedium)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    GestureSet.entries.forEach { g ->
+                        FilterChip(selected = s.recordGestures == g, onClick = { vm.setRecordGestures(g) }, label = { Text(g.title) })
+                    }
+                }
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = { vm.startRecording(Calibration.RECORDING_TAKES) }, enabled = live) { Text("Record") }
                     OutlinedButton(onClick = { vm.startRecording(1) }, enabled = live) { Text("Quick calibration") }

@@ -81,6 +81,10 @@ fun NewHandPanel(s: UiState, vm: InferenceViewModel) {
                     Button(onClick = { vm.manual(HandCommand.OPEN) }, Modifier.weight(1f).height(60.dp)) { Text("OPEN", fontSize = 20.sp) }
                     Button(onClick = { vm.manual(HandCommand.CLOSE) }, Modifier.weight(1f).height(60.dp)) { Text("CLOSE", fontSize = 20.sp) }
                 }
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    FilledTonalButton(onClick = { vm.manual(HandCommand.POINT) }, Modifier.weight(1f)) { Text("☝ Point") }
+                    FilledTonalButton(onClick = { vm.manual(HandCommand.PEACE) }, Modifier.weight(1f)) { Text("✌ Peace") }
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilledTonalButton(onClick = { vm.manual(HandCommand.STEP) }, Modifier.weight(1f)) { Text("Close a bit") }
                     FilledTonalButton(onClick = { confirmCalibrate = true }, Modifier.weight(1f)) { Text("Calibrate…") }

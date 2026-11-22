@@ -13,7 +13,7 @@ class HandModelTest {
     fun `every hand encodes exactly the commands it offers`() {
         for (c in HandCommand.entries) {
             assertEquals(HandModel.HAIFA3D_V1.supports(c), Haifa3dProtocol.encode(c) != null, "v1 $c")
-            assertEquals(HandModel.CONTROLLER_V2.supports(c), HandControllerV2Protocol.encode(c) != null, "v2 $c")
+            assertEquals(HandModel.CONTROLLER_V2.supports(c), HandControllerV2Protocol.messages(c) != null, "v2 $c")
         }
     }
 
@@ -94,5 +94,27 @@ class Haifa3dV1Test {
         // finger 2 closing, wrist right: 1 unit, low torque
         val live = P.liveStep(mapOf(Haifa3dProtocol.Motor.FINGER2 to true, Haifa3dProtocol.Motor.TURN to false))
         assertContentEquals(byteArrayOf(5, 0, 1, 0b10100000.toByte(), 0b00100000), live)
+    }
+}
+
+class FingerGestureTest {
+    @Test
+    fun `poses set every finger, so they come out the same from open or closed`() {
+        val point = HandControllerV2Protocol.messages(HandCommand.POINT)!!
+        assertEquals(listOf(listOf(6, 1, 0), listOf(6, 2, 100), listOf(6, 3, 100), listOf(6, 4, 100)), point.map { m -> m.map { it.toInt() } })
+        val peace = HandControllerV2Protocol.messages(HandCommand.PEACE)!!
+        assertEquals(listOf(0, 0, 100, 100), peace.map { it[2].toInt() })
+        // Old hand: all 4 fingers in one movement; direction bits close only the others.
+        val m = Haifa3dProtocol.decodeAction(Haifa3dProtocol.encode(HandCommand.POINT)!!)!!.single()
+        assertEquals(4, m.motors.size)
+        assertEquals(setOf(Haifa3dProtocol.Motor.FINGER2, Haifa3dProtocol.Motor.FINGER3, Haifa3dProtocol.Motor.FINGER4), m.closing)
+        assertEquals(Haifa3dProtocol.Motor.entries.toSet(), m.highTorque)
+    }
+
+    @Test
+    fun `recordings follow their gesture set`() {
+        val r = GuidedCheck("t", "time", intArrayOf(0, 1, 2, 3, 4, 5, 6), takes = 1, gestures = GestureSet.FINGERS.gestures)
+        assertEquals(listOf(-1, 0, 1, 2, 3, 4, 5, 6), r.phases.map { it.label })
+        assertEquals(HandCommand.PEACE, Gesture.PEACE.command)
     }
 }
