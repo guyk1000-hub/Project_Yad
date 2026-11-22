@@ -110,6 +110,19 @@ class GuidedCheck(
         if (n == 0) "${g.name.padEnd(6)} no windows" else "%-6s %3d%%  (%d/%d)%s".format(g.name, 100 * ok / n, ok, n, confusion)
     } + reactionSummary()
 
+    /** Share of scored windows that were right, over all gestures (null before any). */
+    fun overallPercent(): Int? {
+        val n = scored.values.sum()
+        return if (n == 0) null else correct.values.sum() * 100 / n
+    }
+
+    /** Median reaction time over the moving gestures, or null if none was decided. */
+    fun medianReactionMs(): Int? {
+        val r = reactionMs().filter { it.first != Gesture.REST }.map { it.second }.sorted()
+        if (r.isEmpty()) return null
+        return if (r.size % 2 == 1) r[r.size / 2] else (r[r.size / 2 - 1] + r[r.size / 2]) / 2
+    }
+
     /** "Reaction: CLOSE 820 ms, OPEN 900 ms, … · median 860 ms" (moving gestures; REST starts the check). */
     fun reactionSummary(): List<String> {
         val r = reactionMs().filter { it.first != Gesture.REST }

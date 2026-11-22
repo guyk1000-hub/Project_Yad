@@ -316,6 +316,23 @@ Results: to be measured on the phone (table to fill: mode, N, hop, accuracy, med
 | Fast | 3 | 200 ms | | |
 | Fast | 3 | 100 ms | | |
 
+### 0.9.0: finger gestures, wrist follows effort, a user view (22 Nov)
+
+- **Finger gestures:** POINT and PEACE (ids 5, 6). A recording is either "hand only" (5) or
+  "hand + fingers" (7); a model knows what its recordings had, and the guided check asks for the
+  model's own gestures. Both are absolute poses, so they end the same from open or closed: on the
+  new hand a position for every finger; on the old hand one movement driving each finger to its end
+  stop in its own direction. No thumb: the old hand has no thumb motor; the new one's is passive.
+- **Wrist follows effort (old hand):** while LEFT/RIGHT is decided, a wrist step per decision, as
+  long as effort / the user's typical LEFT/RIGHT magnitude (from their recordings) says: typical =
+  half the time to the next decision, 1.5× = all of it (turning continuously). Sensitivity slider.
+- **User view:** a welcome page to pick or add a person (anyone, not only bundled users; a new
+  person starts with a 3-minute recording), then Home (3 steps: armband → gestures → hand, then a
+  live card with the current gesture and a big STOP), Train (quick calibration, full recording,
+  check with a plain-language result and reaction time; full-screen prompts while recording), Hand
+  (the hand's panel), Settings (Steady / Fast, how sure before moving, wrist follows effort,
+  engineering view). The engineering screens are unchanged, one tap away.
+
 ## Decisions log
 
 | Date | Decision | Why |
@@ -335,6 +352,7 @@ Results: to be measured on the phone (table to fill: mode, N, hop, accuracy, med
 | 2026-11-22 | The app supports both hands, switched by hand; each offers only what it supports | The new hand isn't complete; the project must still finish |
 | 2026-11-22 | Today's screens are the engineering view; an easy end-user view comes later | The user's plan |
 | 2026-11-22 | Keep the CNN; latency via the decision rule (Fast mode); verify on the phone only | The user: the CNN is the concept; no more PC checks |
+| 2026-11-22 | Finger gestures as absolute poses; wrist proportional to effort (old hand only); a user view for anyone | The user's three directions |
 | 2026-11-15 | Train on the phone (own L-BFGS), not on the PC | No PC round trip each session; matches sklearn offline |
 
 ## Ethics notes (to expand)

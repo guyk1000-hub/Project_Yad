@@ -15,7 +15,10 @@ import java.io.File
  * (see yad.core.ModelNames). Names are never reused: saving refuses to overwrite.
  *
  * The phone recordings live in files/recordings/<user>/rec_<user>_<time>.bin, each with its head
- * inputs cached next to it (.feat). A phone-made version uses its user's bundled replay.
+ * inputs cached next to it (.feat). A phone-made version uses its user's bundled replay, if any.
+ *
+ * People: everyone with a bundled model, plus anyone added on the phone (a recordings folder). A new
+ * person has no model until their first recording is trained.
  */
 class ModelCatalog(private val context: Context) {
 
@@ -34,12 +37,34 @@ class ModelCatalog(private val context: Context) {
         get() {
             val calibrated = calibratedDir.listFiles { f -> f.name.endsWith(".json") }.orEmpty()
                 .map { it.name.removeSuffix(".json") }
-                .filter { userOf(it) in bundled }
                 .sortedByDescending { it.substringAfter('@') }
             return bundled + calibrated
         }
 
     fun userOf(name: String): String = ModelNames.userOf(name)
+
+    /**
+     * The people to choose from: added on this phone, plus bundled users. Bundled variants of a
+     * person's PC models (tomer_long, tomer_250) are left to the engineering view.
+     */
+    val people: List<String>
+        get() {
+            val added = File(context.filesDir, "recordings").listFiles { f -> f.isDirectory }.orEmpty().map { it.name }
+            return (bundled.filter { '_' !in it } + added).distinct().sortedBy { it.lowercase() }
+        }
+
+    fun hasBundledModel(person: String) = person in bundled
+
+    /** A person's name: letters, digits, '_' (spaces become '_'). Returns the stored name, or null if invalid / taken. */
+    fun addPerson(name: String): String? {
+        val clean = name.trim().replace(Regex("\\s+"), "_").filter { it.isLetterOrDigit() || it == '_' }.take(24)
+        if (clean.isEmpty() || people.any { it.equals(clean, ignoreCase = true) }) return null
+        recordingsDir(clean)
+        return clean
+    }
+
+    /** The model to use for [person]: their newest phone-made one, else their bundled one, else none yet. */
+    fun modelFor(person: String): String? = latestFor(person) ?: person.takeIf { it in bundled }
 
     /** Made on this phone (calibrated or trained from zero), so it can be deleted. */
     fun isPhoneMade(name: String) = '@' in name
@@ -57,8 +82,12 @@ class ModelCatalog(private val context: Context) {
         else context.assets.open("head_$name.json").bufferedReader().use { it.readText() }
     )
 
-    fun replay(name: String): ReplayRecording =
+    /** The person's bundled recording to replay, or null (people added on the phone have none). */
+    fun replay(name: String): ReplayRecording? = try {
         ReplayRecording.parse(context.assets.open("replay_${userOf(name)}.bin").use { it.readBytes() })
+    } catch (_: java.io.IOException) {
+        null
+    }
 
     fun saveCalibrated(name: String, headJson: String) {
         val f = File(calibratedDir, "$name.json")

@@ -8,7 +8,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.darkColorScheme
 import androidx.lifecycle.viewmodel.compose.viewModel
-import yad.app.ui.InferenceScreen
+import yad.app.ui.AppRoot
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -17,7 +17,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
                 Surface {
-                    InferenceScreen(viewModel())
+                    AppRoot(viewModel())
                 }
             }
         }

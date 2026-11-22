@@ -89,6 +89,11 @@ the Haifa3D app's functions: live hold-to-move, an action builder, 12 presets on
 `core/Decision.kt` `AgreeDecisionPolicy`; overlapping windows via `Windower(hop)`; the guided
 check shows the reaction time. The CNN engine default is 4 threads without XNNPACK.
 **User rules (22 Nov):** keep the CNN; no PC-side verification any more (phone only); hands as they are.
+**0.9.0 (`~/ProjectYad-0.9.0.apk`, untested):** POINT/PEACE + gesture sets (`core/Hand.kt`
+`GestureSet`), proportional wrist (`core/ProportionalWrist.kt`, old hand), and a USER VIEW
+(`ui/UserApp.kt`: welcome + people, Home/Train/Hand/Settings, full-screen guided prompts). People
+added on the phone have no bundled model (`ModelCatalog.people/addPerson/modelFor`). The engineering
+view is behind Settings → "Open the engineering view".
 
 **Rule (from the user, 22 Nov): the private repo and the hand's firmware/config are NOT ours to
 change.** Use the hand as it is; report hardware or firmware limits to its maintainers. So, for

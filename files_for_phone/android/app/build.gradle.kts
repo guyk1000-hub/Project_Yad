@@ -12,8 +12,8 @@ android {
         applicationId = "yad.app"
         minSdk = 33          // Galaxy S23 FE launched with Android 13
         targetSdk = 35
-        versionCode = 14
-        versionName = "0.8.0-fast"
+        versionCode = 15
+        versionName = "0.9.0-user"
         ndk { abiFilters += "arm64-v8a" }   // the S23 FE; keeps the APK small
     }
 

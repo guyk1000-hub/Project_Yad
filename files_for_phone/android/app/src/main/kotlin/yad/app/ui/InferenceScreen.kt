@@ -78,7 +78,10 @@ fun InferenceScreen(vm: InferenceViewModel) {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("Project Yad", style = MaterialTheme.typography.headlineSmall)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Project Yad · engineering", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
+            OutlinedButton(onClick = { vm.setEngineering(false) }) { Text("Simple view") }
+        }
         Text(s.status, style = MaterialTheme.typography.bodySmall)
         s.selfTest?.let {
             Text(it, color = if (s.selfTestPassed == true) ResumeGreen else StopRed, fontWeight = FontWeight.Bold)

@@ -125,6 +125,20 @@ data class UiState(
     val recordings: List<RecordingInfo> = emptyList(),
     val newModelLabel: String = "",
     val recordGestures: GestureSet = GestureSet.BASIC,
+    val person: String? = null,
+    val people: List<String> = emptyList(),
+    /** false = the easy user view; true = the engineering screens. */
+    val engineering: Boolean = false,
+    /** Model per person (display name), for the person picker. */
+    val peopleModels: Map<String, String?> = emptyMap(),
+    // the running guided check / recording, for the full-screen prompt
+    val checkGesture: Gesture? = null,
+    val checkSecondsLeft: Int = 0,
+    val checkTitle: String = "",
+    val checkProgress: Float = 0f,
+    val checkIsRecording: Boolean = false,
+    val checkScore: Int? = null,
+    val checkReactionMs: Int? = null,
     val proportionalWrist: Boolean = false,
     val wristSensitivity: Double = 1.0,
     val wristEffortPct: Int? = null,
@@ -217,7 +231,7 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
                 modelBuffer = TfliteFeatureExtractor.mapAsset(app)
                 extractor = TfliteFeatureExtractor(modelBuffer!!)
                 val names = catalog.names
-                _state.update { it.copy(models = names) }
+                _state.update { it.copy(models = names, people = catalog.people, peopleModels = peopleModels()) }
                 if ("tomer" in names) {
                     golden = GoldenCheck(app)
                     val check = golden!!.run(extractor!!, catalog.head("tomer"))
@@ -281,14 +295,38 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
         replay = r
         wrist = null                      // the effort reference belongs to the user and features of this model
         resetSignalPath()
-        refreshRecordings(catalog.userOf(name))
+        val person = catalog.userOf(name)
+        refreshRecordings(person)
         _state.update {
             it.copy(
-                model = name,
-                restReference = ChannelLevels.restReference(r),
-                status = "$name: features RMS over ${h.rmsOver.jsonName}; replay ${r.size} windows (${r.size * WINDOW_MS / 1000} s)",
+                model = name, person = person, people = catalog.people, peopleModels = peopleModels(),
+                restReference = r?.let { rec -> ChannelLevels.restReference(rec) },
+                status = "$name: features RMS over ${h.rmsOver.jsonName}" + (r?.let { rec -> "; replay ${rec.size} windows (${rec.size * WINDOW_MS / 1000} s)" } ?: "; no recording to replay"),
             )
         }
+    }
+
+    /** Switches to [person]: their newest model, or none yet (a new person records first). */
+    fun selectPerson(person: String) {
+        stopRun()
+        viewModelScope.launch(worker) {
+            val model = catalog.modelFor(person)
+            if (model != null) loadModel(model) else {
+                head = null; replay = null; wrist = null
+                resetSignalPath()
+                refreshRecordings(person)
+                _state.update { it.copy(model = null, person = person, people = catalog.people, peopleModels = peopleModels(), restReference = null, status = "$person: no model yet") }
+            }
+        }
+    }
+
+    private fun peopleModels(): Map<String, String?> = catalog.people.associateWith { p -> catalog.modelFor(p)?.let { displayName(it) } }
+
+    /** Adds a person; returns an error message, or null when added (and selected). */
+    fun addPerson(name: String): String? {
+        val added = catalog.addPerson(name) ?: return "Use letters or digits, and a name that isn't taken."
+        selectPerson(added)
+        return null
     }
 
     fun selectSource(source: Source) {
@@ -413,7 +451,7 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
     /** Worker thread: the user's typical LEFT/RIGHT magnitude from their cached recording features. */
     private fun effortReference(): Double? {
         val h = head ?: return null
-        val user = catalog.userOf(_state.value.model ?: return null)
+        val user = _state.value.person ?: return null
         val sets = catalog.recordings(user).mapNotNull { f ->
             val cache = java.io.File(f.path.removeSuffix(".bin") + ".feat")
             if (!cache.exists()) return@mapNotNull null
@@ -533,13 +571,17 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         viewModelScope.launch(worker) {
-            val h = head ?: return@launch
+            val h = head
+            if (h == null && takes == 0) {
+                _state.update { it.copy(checkStatus = "Record first: there's no model to check yet.") }
+                return@launch
+            }
             recordingTakes = takes
             // A recording asks for the chosen gesture set; a check, for the gestures this model knows.
-            val gestures = if (takes > 0) s.recordGestures.gestures
+            val gestures = if (takes > 0 || h == null) s.recordGestures.gestures
                 else listOf(Gesture.REST) + h.classes.toList().mapNotNull { Gesture.fromId(it) }.filter { it != Gesture.REST }
-            check = GuidedCheck(s.model ?: "?", h.rmsOver.jsonName,
-                if (takes > 0) gestures.map { it.id }.toIntArray() else h.classes,
+            check = GuidedCheck(s.model ?: s.person ?: "?", (h?.rmsOver ?: yad.core.RmsOver.TIME).jsonName,
+                if (takes > 0 || h == null) gestures.map { it.id }.toIntArray() else h.classes,
                 phaseSeconds = if (takes > 0) Calibration.PHASE_SECONDS else GuidedCheck.PHASE_SECONDS,
                 takes = maxOf(takes, 1), gestures = gestures)
             _state.update { it.copy(checkResults = emptyList(), checkStatus = null, trainingStatus = null) }
@@ -556,12 +598,16 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
             val left = (start + c.phases[phase].seconds * SAMPLE_RATE - n + SAMPLE_RATE - 1) / SAMPLE_RATE
             val p = c.phases[phase]
             val title = if (p.label < 0) p.title else "Hold ${p.title}"
-            _state.update { it.copy(checkPrompt = "$title   ($left s)", checkStep = "${phase + 1}/${c.phases.size}") }
+            _state.update {
+                it.copy(checkPrompt = "$title   ($left s)", checkStep = "${phase + 1}/${c.phases.size}",
+                    checkGesture = Gesture.fromId(p.label), checkSecondsLeft = left, checkTitle = p.title,
+                    checkProgress = (phase + 1f) / c.phases.size, checkIsRecording = recordingTakes > 0)
+            }
             return
         }
         check = null
         if (recordingTakes > 0) {
-            val user = catalog.userOf(c.model)
+            val user = _state.value.person ?: catalog.userOf(c.model)
             val bytes = c.toBytes()
             val fileName = "rec_${user}_${timestamp()}.bin"
             catalog.saveRecording(user, fileName, bytes)
@@ -574,15 +620,27 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
         }
         val results = c.results()
         val saved = saveToDownloads("yad_check_${c.model}_${timestamp()}.bin", c.toBytes())
-        _state.update { it.copy(checkPrompt = null, checkStep = null, checkResults = results, checkStatus = saved) }
+        _state.update {
+            it.copy(checkPrompt = null, checkStep = null, checkResults = results, checkStatus = saved,
+                checkScore = c.overallPercent(), checkReactionMs = c.medianReactionMs())
+        }
     }
 
     fun setNewModelLabel(label: String) = _state.update { it.copy(newModelLabel = label) }
     fun setRecordGestures(set: GestureSet) = _state.update { it.copy(recordGestures = set) }
+    fun setEngineering(on: Boolean) = _state.update { it.copy(engineering = on) }
+
+    /** Ends a running guided check or recording without saving it. */
+    fun cancelGuided() {
+        viewModelScope.launch(worker) {
+            check = null
+            _state.update { it.copy(checkPrompt = null, checkStep = null, checkStatus = "Cancelled.") }
+        }
+    }
 
     /** Retrains the current user's model on their phone recordings (no armband needed). */
     fun retrain() {
-        val user = catalog.userOf(_state.value.model ?: return)
+        val user = _state.value.person ?: return
         stopRun()
         viewModelScope.launch(worker) { trainFromRecordings(user, afterNewRecording = false) }
     }
@@ -596,11 +654,13 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
     private fun trainFromRecordings(user: String, afterNewRecording: Boolean) {
         val fx = extractor ?: return
         try {
-            val base = catalog.head(user)      // same features and classes as the user's bundled model
+            // Same features as the person's bundled model; people added on the phone use RMS over time.
+            val base = if (catalog.hasBundledModel(user)) catalog.head(user) else null
+            val rmsOver = base?.rmsOver ?: yad.core.RmsOver.TIME
             val files = catalog.recordings(user)
             if (files.isEmpty()) { trainingStatus("No recordings for $user yet: tap Record."); return }
             val sets = files.mapIndexed { k, f ->
-                recordingFeatures(f, base.rmsOver, fx) { pct -> trainingStatus("Computing features, recording ${k + 1}/${files.size}: $pct%") }
+                recordingFeatures(f, rmsOver, fx) { pct -> trainingStatus("Computing features, recording ${k + 1}/${files.size}: $pct%") }
             }
             // An honest number, before retraining: the previous phone model on data it has never seen.
             val previous = catalog.latestPhoneTrained(user)
@@ -616,13 +676,13 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
             val name = yad.core.ModelNames.phoneTrained(user, _state.value.newModelLabel, timestamp())
             val note = "trained on the phone from zero: ${files.size} recordings (${files.joinToString { it.name }}), " +
                 "${data.size} windows, ${result.iterations} iterations"
-            val names = Gesture.entries.associate { it.id to it.name.lowercase() } + base.classNames
-            val json = result.toHeadJson(name, base.rmsOver, names, note)
+            val names = Gesture.entries.associate { it.id to it.name.lowercase() } + (base?.classNames ?: emptyMap())
+            val json = result.toHeadJson(name, rmsOver, names, note)
             catalog.saveCalibrated(name, json)
             // A copy for the PC: tools/analyze_check.py needs it to rerun checks made with this version.
             saveToDownloads("yad_model_$name.json", json.toByteArray(Charsets.UTF_8))
             _state.update { it.copy(models = catalog.names) }
-            loadModel(name)
+            loadModel(name)    // also refreshes the person list
             trainingStatus("✓ Saved ${displayName(name)}: ${files.size} recordings, ${data.size} windows, trained in $secs s. " +
                 before + "Start the armband and run the guided check.")
         } catch (e: Exception) {
@@ -660,7 +720,7 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
     /** Copies recordings the user picked (e.g. yad_calib_* / rec_* from Downloads) into the current user's recordings, then retrains. */
     fun importRecordings(uris: List<android.net.Uri>) {
         if (uris.isEmpty()) return
-        val user = catalog.userOf(_state.value.model ?: return)
+        val user = _state.value.person ?: return
         stopRun()
         viewModelScope.launch(worker) {
             val resolver = getApplication<Application>().contentResolver
@@ -685,7 +745,7 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun deleteRecording(fileName: String) {
-        val user = catalog.userOf(_state.value.model ?: return)
+        val user = _state.value.person ?: return
         viewModelScope.launch(worker) {
             catalog.recordings(user).firstOrNull { it.name == fileName }?.let { catalog.deleteRecording(it) }
             refreshRecordings(user)
@@ -706,7 +766,7 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
             val user = catalog.userOf(name)
             catalog.delete(name)
             _state.update { it.copy(models = catalog.names) }
-            loadModel(catalog.latestFor(user) ?: user)
+            catalog.modelFor(user)?.let { loadModel(it) } ?: selectPerson(user)
         }
     }
 
