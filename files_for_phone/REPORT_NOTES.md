@@ -254,6 +254,20 @@ Findings:
    half come during steady holds.
 4. Caveat: one person, one main day, 6.7 min of data. To be confirmed with Guy and on other days.
 
+### Two hands, chosen in the app (0.7.0, 22 Nov)
+
+The new hand (Haifa3D Hand-Controller-System v2) isn't complete yet: one motor board with 4
+fingers, no wrist, and it only boots on USB power. We use it as it is, without changing it. The app
+drives either hand, picked by hand, and each hand offers only what it supports:
+
+| | Old hand (Haifa3D v1) | New hand (controller v2) |
+|---|---|---|
+| Connection | the phone connects to the hand (BLE central) | the hand connects to the phone (the phone advertises the "manager" service) |
+| Commands | OPEN, CLOSE, LEFT, RIGHT (wrist) | OPEN, CLOSE, STOP, CLOSE A BIT, CALIBRATE |
+| Speed | — | 10–100 (the hand's default is 50) |
+| STOP button | blocks the classifier | blocks the classifier and stops the motors |
+| LEFT / RIGHT gestures | move the wrist | logged as "not supported", nothing sent |
+
 ## Decisions log
 
 | Date | Decision | Why |
@@ -269,6 +283,8 @@ Findings:
 | 2026-11-15 | Record and train from zero on the phone, on all of a person's phone recordings; old PC data dropped | E-calib2 (user's idea) |
 | 2026-11-15 | User-chosen model names: `<user>-<label>@<time>` | The user wanted names; the time keeps them unique |
 | 2026-11-15 | Bench every latency idea offline first (`tools/bench.py`) | Latency vs wrong moves is a trade-off: measure it |
+| 2026-11-22 | The new hand and its code are used as they are (not ours to change) | The user: not up to them |
+| 2026-11-22 | The app supports both hands, switched by hand; each offers only what it supports | The new hand isn't complete; the project must still finish |
 | 2026-11-15 | Train on the phone (own L-BFGS), not on the PC | No PC round trip each session; matches sklearn offline |
 
 ## Ethics notes (to expand)

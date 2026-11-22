@@ -70,6 +70,13 @@ in `~/ext/haifa3d/private/`, outside this repo; NOT yet confirmed against the re
 - Sensor route: needs the phone's fixed MAC in the config. Android randomises its BLE address,
   so it's a poor fit unless the firmware changes.
 
+**0.7.0 (22 Nov, `~/ProjectYad-0.7.0.apk`, NOT yet tested with either hand):** a hand picker in the
+app (old v1 / new v2, remembered). Commands per hand come from `core/Hand.kt` `HandModel`.
+`app/hand/HandControllerV2Hand.kt` is the phone as the v2 "manager": a GATT server plus
+advertising `0000abcd…`, notifications on `0000dcba…`, bytes `[cmd, 0, value]`. A speed slider
+(VELOCITY) is sent on change and on connect. STOP also sends the hand's STOP. Unsupported
+commands are logged, not sent. Needs BLUETOOTH_ADVERTISE.
+
 **Rule (from the user, 22 Nov): the private repo and the hand's firmware/config are NOT ours to
 change.** Use the hand as it is; report hardware or firmware limits to its maintainers. So, for
 now: open/close (+ step, per-finger position, speed, calibrate, stop) on the motors that are on

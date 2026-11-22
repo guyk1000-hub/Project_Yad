@@ -13,6 +13,9 @@ interface HandDriver : HandSink {
     val state: StateFlow<HandState>
     suspend fun connect()
     fun disconnect()
+
+    /** Movement speed, for hands that have one (HandModel.speedRange). */
+    suspend fun setSpeed(value: Int) {}
 }
 
 sealed interface HandState {

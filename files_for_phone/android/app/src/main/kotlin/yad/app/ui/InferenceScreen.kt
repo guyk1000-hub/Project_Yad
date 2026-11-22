@@ -57,6 +57,7 @@ import yad.app.UiState
 import yad.app.displayName
 import yad.core.Calibration
 import yad.core.HandCommand
+import yad.core.HandModel
 import yad.core.ModelNames
 import kotlin.math.roundToInt
 
@@ -84,7 +85,9 @@ fun InferenceScreen(vm: InferenceViewModel) {
 
         GestureCard(s)
         StopButton(s.stopped, vm::toggleStop)
-        ManualButtons(vm::manual)
+        HandPicker(s, vm::selectHandModel)
+        ManualButtons(s, vm::manual)
+        HandSpeed(s, vm::setHandSpeed)
         HandSection(s, vm::setRealHand)
         RunControls(s, onStart = vm::start, onStop = vm::stopRun, onRealTime = vm::setRealTime)
         TrainSection(s, vm)
@@ -131,7 +134,7 @@ private fun GestureCard(s: UiState) {
             val truth = if (s.source == Source.REPLAY) "   ·   recorded as: ${s.trueGesture?.name ?: "—"}" else ""
             Text("this window: ${s.windowGesture?.name ?: "—"}$truth")
             Text(
-                if (s.realHand) "real hand: ${s.handState}" else "simulated hand: ${s.simulatedPosition?.name ?: "not moved yet"}",
+                if (s.realHand) "real hand: ${s.handState}" else "simulated hand: ${s.simulatedPosition?.title ?: "not moved yet"}",
                 style = MaterialTheme.typography.bodySmall,
             )
         }
@@ -150,19 +153,45 @@ private fun StopButton(stopped: Boolean, onToggle: () -> Unit) {
 }
 
 @Composable
-private fun ManualButtons(onCommand: (HandCommand) -> Unit) {
+private fun HandPicker(s: UiState, onSelect: (HandModel) -> Unit) {
+    Text("Hand", style = MaterialTheme.typography.labelMedium)
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        HandModel.entries.forEach { m ->
+            FilterChip(selected = m == s.handModel, onClick = { onSelect(m) }, label = { Text(m.title) })
+        }
+    }
+    if (s.handModel == HandModel.CONTROLLER_V2) {
+        Text("No wrist on this hand: LEFT / RIGHT gestures send nothing. To connect: turn on Real hand, " +
+            "then turn the hand on (or restart it); it finds the phone by itself.", style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+@Composable
+private fun ManualButtons(s: UiState, onCommand: (HandCommand) -> Unit) {
     Text("Manual (always works, even when stopped)", style = MaterialTheme.typography.labelMedium)
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-        HandCommand.entries.forEach { cmd ->
-            OutlinedButton(onClick = { onCommand(cmd) }, modifier = Modifier.weight(1f)) { Text(cmd.name) }
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        s.handModel.commands.forEach { cmd ->
+            OutlinedButton(onClick = { onCommand(cmd) }) { Text(cmd.title) }
         }
     }
 }
 
 @Composable
+private fun HandSpeed(s: UiState, onSpeed: (Int) -> Unit) {
+    val range = s.handModel.speedRange ?: return
+    var value by remember(s.handModel) { mutableStateOf(s.handSpeed.toFloat()) }
+    Text("Hand speed: ${value.roundToInt()}", style = MaterialTheme.typography.labelMedium)
+    Slider(
+        value = value, onValueChange = { value = it },
+        valueRange = range.first.toFloat()..range.last.toFloat(), steps = (range.last - range.first) / 10 - 1,
+        onValueChangeFinished = { onSpeed(value.roundToInt()) },
+    )
+}
+
+@Composable
 private fun HandSection(s: UiState, onRealHand: (Boolean) -> Unit) {
     val context = LocalContext.current
-    val perms = arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_SCAN)
+    val perms = arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_ADVERTISE)
     var denied by remember { mutableStateOf(false) }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
         denied = !result.values.all { it }

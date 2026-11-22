@@ -128,7 +128,7 @@ class Haifa3dBleHand(private val context: Context, val address: String = Haifa3d
         val type = if (withResponse) BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT else BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
         val done = CompletableDeferred<Int>()
         pendingWrite = done
-        val rc = g.writeCharacteristic(c, Haifa3dProtocol.encode(command), type)
+        val rc = g.writeCharacteristic(c, checkNotNull(Haifa3dProtocol.encode(command)) { "the old hand can't do $command" }, type)
         check(rc == 0) { "write rejected (code $rc)" }   // BluetoothStatusCodes.SUCCESS
         val status = withTimeoutOrNull(WRITE_TIMEOUT_MS) { done.await() }
         check(status == null && !withResponse || status == BluetoothGatt.GATT_SUCCESS) { "write failed (status $status)" }

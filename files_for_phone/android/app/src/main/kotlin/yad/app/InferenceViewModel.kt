@@ -18,6 +18,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.yield
 import yad.app.armband.ArmbandReceiver
 import yad.app.hand.Haifa3dBleHand
+import yad.app.hand.HandControllerV2Hand
 import yad.app.hand.HandDriver
 import yad.app.hand.HandState
 import yad.app.hand.SimulatedHand
@@ -36,6 +37,7 @@ import yad.core.Gesture
 import yad.core.GroupAverageDecisionPolicy
 import yad.core.GroupScorer
 import yad.core.HandCommand
+import yad.core.HandModel
 import yad.core.MlpHead
 import yad.core.ReplayRecording
 import yad.core.ScalarFeatures
@@ -79,6 +81,8 @@ data class UiState(
     val liveLevels: DoubleArray? = null,
     val restReference: DoubleArray? = null,
     // hand
+    val handModel: HandModel = HandModel.HAIFA3D_V1,
+    val handSpeed: Int = HandModel.CONTROLLER_V2.defaultSpeed,
     val realHand: Boolean = false,
     val handState: String = "simulated",
     val simulatedPosition: HandCommand? = null,
@@ -123,6 +127,7 @@ fun displayName(name: String): String = yad.core.ModelNames.display(name)
 
 const val PI_GROUP_SIZE = 6
 private const val LOG_SIZE = 40
+private const val PREF_HAND = "hand_model"
 private const val TIMING_WINDOW = 50
 
 /**
@@ -134,8 +139,13 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
     private val catalog = ModelCatalog(app)
     private val worker = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
     private val simulatedHand = SimulatedHand()
-    /** The real hand. A new hand version = a new HandDriver here. */
-    private val realHand: HandDriver = Haifa3dBleHand(app)
+    /** One driver per hand model; the user picks which one is used (remembered across launches). */
+    private val drivers: Map<HandModel, HandDriver> = mapOf(
+        HandModel.HAIFA3D_V1 to Haifa3dBleHand(app),
+        HandModel.CONTROLLER_V2 to HandControllerV2Hand(app),
+    )
+    private val prefs = app.getSharedPreferences("yad", android.content.Context.MODE_PRIVATE)
+    private val realHand: HandDriver get() = drivers.getValue(_state.value.handModel)
     private val receiver = ArmbandReceiver(app)
     private val gate = CommandGate()
 
@@ -182,15 +192,21 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
         }
         viewModelScope.launch { simulatedHand.position.collect { p -> _state.update { it.copy(simulatedPosition = p) } } }
         viewModelScope.launch { receiver.status.collect { st -> _state.update { it.copy(armband = st) } } }
-        viewModelScope.launch {
-            realHand.state.collect { st ->
+        val savedModel = prefs.getString(PREF_HAND, null)?.let { n -> HandModel.entries.firstOrNull { it.name == n } }
+        if (savedModel != null) _state.update { it.copy(handModel = savedModel) }
+        for ((model, driver) in drivers) viewModelScope.launch {
+            driver.state.collect { st ->
                 val text = when (st) {
                     HandState.Disconnected -> "disconnected"
                     is HandState.Connecting -> st.step + "…"
                     HandState.Ready -> "connected"
                     is HandState.Failed -> "failed: ${st.reason}"
                 }
-                _state.update { if (it.realHand) it.copy(handState = text) else it }
+                _state.update { if (it.realHand && it.handModel == model) it.copy(handState = text) else it }
+                // The hand starts at its own default speed: send ours once it's connected.
+                if (st == HandState.Ready && model.speedRange != null && _state.value.handModel == model) {
+                    viewModelScope.launch(Dispatchers.Default) { sendSpeed(_state.value.handSpeed) }
+                }
             }
         }
         viewModelScope.launch(Dispatchers.Default) {
@@ -593,23 +609,59 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---- hand ----------------------------------------------------------------------------
 
-    /** STOP: classifier commands are blocked immediately; manual buttons keep working. */
+    /**
+     * STOP: classifier commands are blocked immediately; manual buttons keep working. A hand with
+     * its own stop command (the new hand) is also told to stop moving.
+     */
     fun toggleStop() {
         if (gate.stopped) gate.resume() else gate.stop()
         _state.update { it.copy(stopped = gate.stopped) }
+        if (gate.stopped && _state.value.handModel.supports(HandCommand.STOP)) {
+            viewModelScope.launch(Dispatchers.Default) { deliver(HandCommand.STOP, "STOP button") }
+        }
+    }
+
+    /** Switches which hand the app drives. Disconnects the current real hand first. */
+    fun selectHandModel(model: HandModel) {
+        if (model == _state.value.handModel) return
+        val wasReal = _state.value.realHand
+        if (wasReal) realHand.disconnect()
+        prefs.edit().putString(PREF_HAND, model.name).apply()
+        _state.update { it.copy(handModel = model, handSpeed = model.defaultSpeed, realHand = false, handState = "simulated") }
+    }
+
+    /** For hands with a speed: remembered, and sent to the real hand when connected. */
+    fun setHandSpeed(value: Int) {
+        _state.update { it.copy(handSpeed = value) }
+        viewModelScope.launch(Dispatchers.Default) { sendSpeed(value) }
+    }
+
+    private suspend fun sendSpeed(value: Int) {
+        val s = _state.value
+        if (!s.realHand || s.handModel.speedRange == null) return
+        try {
+            realHand.setSpeed(value)
+        } catch (e: Exception) {
+            _state.update { it.copy(handState = "${it.handState} (speed not sent: ${e.message})") }
+        }
     }
 
     fun manual(command: HandCommand) {
         viewModelScope.launch(Dispatchers.Default) { deliver(gate.manual(command), "manual") }
     }
 
-    /** Call only after BLUETOOTH_CONNECT / BLUETOOTH_SCAN are granted. */
+    /** Call only after BLUETOOTH_CONNECT / BLUETOOTH_SCAN / BLUETOOTH_ADVERTISE are granted. */
     fun setRealHand(on: Boolean) {
         _state.update { it.copy(realHand = on, handState = if (on) "connecting…" else "simulated") }
         viewModelScope.launch(Dispatchers.Default) { if (on) realHand.connect() else realHand.disconnect() }
     }
 
     private suspend fun deliver(cmd: HandCommand, source: String) {
+        val model = _state.value.handModel
+        if (!model.supports(cmd)) {
+            log(source, cmd, "not supported by the ${model.title.lowercase()}")
+            return
+        }
         if (!_state.value.realHand) {
             simulatedHand.send(cmd)
             log(source, cmd, "simulated")
@@ -671,7 +723,7 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
     override fun onCleared() {
         loop?.cancel()
         receiver.stop()
-        realHand.disconnect()
+        drivers.values.forEach { it.disconnect() }
         extractor?.close()
         worker.close()
     }

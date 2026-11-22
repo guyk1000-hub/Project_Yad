@@ -3,8 +3,10 @@
     <!-- Armband: UDP from the MindRove armband over its WiFi network (sockets need INTERNET). -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <!-- Hand: BLE connection to the Haifa3D hand. Scanning is only a fallback to find it by address. -->
+    <!-- Hand: BLE connection to the Haifa3D hand. Scanning is only a fallback to find the old hand by
+         address; the new hand finds the phone, so the phone advertises (BLUETOOTH_ADVERTISE). -->
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
     <uses-permission
         android:name="android.permission.BLUETOOTH_SCAN"
         android:usesPermissionFlags="neverForLocation" />
