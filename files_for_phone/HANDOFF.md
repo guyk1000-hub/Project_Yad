@@ -50,6 +50,29 @@ The user has a new version of the hand. The app is ready for a second driver:
   is the v1 driver. The ViewModel only knows `HandDriver`: a new hand = a new class, plus picking
   it in the app.
 
+**What the private repo says (Haifa3D/Hand-Controller-System, `main` as a zip, 22 Nov; unpacked
+in `~/ext/haifa3d/private/`, outside this repo; NOT yet confirmed against the real hand):**
+- Controller v2.0 (ESP32, PlatformIO, NimBLE). Everything is set by a JSON config on the hand
+  (`data/default_hand_configuration.json` = 4 DC fingers + wrist; `Hand2_configuration.json` = servo
+  fingers: index, middle, ring on; pinky and wrist off).
+- Reversed roles vs v1: the **hand is the BLE central**. It connects out to "sensors" (peripherals,
+  by a fixed MAC from the config) and to a "manager" (a phone app acting as a peripheral, found by
+  scanning for its advertised service UUID). No `e0198000…` services.
+- **Manager route (the likely one for our app):** the phone runs a GATT server advertising service
+  `0000abcd-0000-1000-8000-00805f9b34fb` (Hand2 config) with a notify characteristic
+  `0000dcba-…`. The hand subscribes. Byte 0 = command (`defines.h` enum): 0 STOP, 1 FORWARD,
+  2 BACKWARD, 3 CLOCKWISE (= FORWARD), 4 COUNTER_CLOCKWISE (= BACKWARD), 5 STEP, 6 POSITION
+  [motor index+1, target %], 7 CALIBRATE, 8 VELOCITY [_, speed]. They act on all servo motors
+  (`managerInterface.cpp`); no separate wrist command seen. A security passkey = `technicianCode`
+  in the config (2025 / 2026) may be required. The manager must be `"status": "on"` in the hand's config.
+- The bundled official manager APK (`Manager Application/APK/app-release.apk`) uses the same
+  `0000abcd` / `0000dcba` IDs and `openGattServer`, so it is a peripheral.
+- Sensor route: needs the phone's fixed MAC in the config. Android randomises its BLE address,
+  so it's a poor fit unless the firmware changes.
+
+To verify with the hand: (1) does their manager APK control it; (2) nRF Connect scan: the
+hand probably doesn't advertise at all in v2; (3) which motors/config the hand has.
+
 To learn about the new hand: its name/version, and whether it's still BLE with the same
 "direct execute" characteristic or a different protocol (docs, the maker's app, or firmware
 source). Also its BLE name/address, pairing, and whether it offers more motions (fingers,
