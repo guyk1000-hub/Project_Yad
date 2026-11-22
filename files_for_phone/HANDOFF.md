@@ -41,6 +41,22 @@ Owners: Guy Katabi and Tomer Ohayon. Repo: github.com/guyk1000-hub/Project_Yad, 
   overwrites. 0.6.1 is not yet on the phone.
 - Session files: `tools/out/checks/` (git-ignored: personal data).
 
+## New hand version (from 22 Nov; the user will give directions)
+
+The user has a new version of the hand. The app is ready for a second driver:
+- `core/Hand.kt`: `HandCommand` (OPEN, CLOSE, LEFT, RIGHT) is protocol-neutral. The v1 bytes live
+  in `Haifa3dProtocol.encode`, still matched by the golden test against `files_for_pi/protocol.py`.
+- `app/hand/HandDriver.kt`: interface (label, state, connect, disconnect, send). `Haifa3dBleHand`
+  is the v1 driver. The ViewModel only knows `HandDriver`: a new hand = a new class, plus picking
+  it in the app.
+
+To learn about the new hand: its name/version, and whether it's still BLE with the same
+"direct execute" characteristic or a different protocol (docs, the maker's app, or firmware
+source). Also its BLE name/address, pairing, and whether it offers more motions (fingers,
+grips, speed, presets: the v1 had preset/trigger/config services, see protocol.py). If nothing is
+documented: add a small BLE explorer screen (scan, list services/characteristics, write test
+bytes) and discover it with the hand in front of us.
+
 ## Next steps
 
 Hardware, whenever there's time: install 0.6.1. Tomer does a **Quick calibration** (1 min,

@@ -18,6 +18,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.yield
 import yad.app.armband.ArmbandReceiver
 import yad.app.hand.Haifa3dBleHand
+import yad.app.hand.HandDriver
+import yad.app.hand.HandState
 import yad.app.hand.SimulatedHand
 import yad.app.ml.Engine
 import yad.app.ml.TfliteFeatureExtractor
@@ -132,7 +134,8 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
     private val catalog = ModelCatalog(app)
     private val worker = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
     private val simulatedHand = SimulatedHand()
-    private val realHand = Haifa3dBleHand(app)
+    /** The real hand. A new hand version = a new HandDriver here. */
+    private val realHand: HandDriver = Haifa3dBleHand(app)
     private val receiver = ArmbandReceiver(app)
     private val gate = CommandGate()
 
@@ -182,10 +185,10 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             realHand.state.collect { st ->
                 val text = when (st) {
-                    Haifa3dBleHand.State.Disconnected -> "disconnected"
-                    is Haifa3dBleHand.State.Connecting -> st.step + "…"
-                    Haifa3dBleHand.State.Ready -> "connected"
-                    is Haifa3dBleHand.State.Failed -> "failed: ${st.reason}"
+                    HandState.Disconnected -> "disconnected"
+                    is HandState.Connecting -> st.step + "…"
+                    HandState.Ready -> "connected"
+                    is HandState.Failed -> "failed: ${st.reason}"
                 }
                 _state.update { if (it.realHand) it.copy(handState = text) else it }
             }

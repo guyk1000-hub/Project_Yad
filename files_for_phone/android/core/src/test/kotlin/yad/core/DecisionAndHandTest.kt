@@ -47,7 +47,7 @@ class DecisionAndHandTest {
             if (payload.isNull()) {
                 assertNull(gesture.command, "$gesture sends nothing")
             } else {
-                val bytes = gesture.command!!.payload.map { it.toInt() and 0xFF }
+                val bytes = Haifa3dProtocol.encode(gesture.command!!).map { it.toInt() and 0xFF }
                 assertEquals(payload.ints().toList(), bytes, "$gesture payload")
             }
         }
