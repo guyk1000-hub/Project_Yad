@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -296,6 +297,7 @@ private fun LiveCard(s: UiState, vm: InferenceViewModel, onHand: () -> Unit) {
                 onClick = vm::toggleStop, modifier = Modifier.fillMaxWidth().height(72.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = if (s.stopped) Connected else Danger),
             ) { Text(if (s.stopped) "RESUME" else "STOP", fontSize = 26.sp, fontWeight = FontWeight.Bold) }
+            if (!s.realHand) SimulatedHandView(s, vm)
             Text(
                 when {
                     s.stopped -> "Stopped: gestures don't move the hand. Buttons in the Hand tab still work."
@@ -532,5 +534,44 @@ private fun ModelChooser(s: UiState, vm: InferenceViewModel, onDone: () -> Unit)
             confirmButton = { TextButton(onClick = { vm.deleteModel(m); deleting = null }) { Text("Delete", color = Danger) } },
             dismissButton = { TextButton(onClick = { deleting = null }) { Text("Cancel") } },
         )
+    }
+}
+
+/** What the hand would be doing, for trying things out without a hand. */
+@Composable
+private fun SimulatedHandView(s: UiState, vm: InferenceViewModel) {
+    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Simulated hand", style = MaterialTheme.typography.labelLarge)
+            val pose = when (s.simulatedPosition) {
+                yad.core.HandCommand.OPEN -> "🖐 open"
+                yad.core.HandCommand.CLOSE -> "✊ closed"
+                yad.core.HandCommand.POINT -> "☝ pointing"
+                yad.core.HandCommand.PEACE -> "✌ peace sign"
+                else -> "not moved yet"
+            }
+            Text("Fingers: $pose", style = MaterialTheme.typography.titleMedium)
+            if (s.handModel == HandModel.HAIFA3D_V1) {
+                val share = s.simWristMs.toFloat() / yad.app.SIM_WRIST_MS          // -1 (left) .. 1 (right)
+                Text("Wrist: " + when {
+                    s.simWristMs < 0 -> "turned left (${"%.1f".format(-s.simWristMs / 1000.0)} s of turning)"
+                    s.simWristMs > 0 -> "turned right (${"%.1f".format(s.simWristMs / 1000.0)} s of turning)"
+                    else -> "straight"
+                })
+                Row(Modifier.fillMaxWidth().height(14.dp)) {
+                    // A bar from the middle: left half fills for left, right half for right.
+                    Box(Modifier.weight(1f).fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(topStart = 7.dp, bottomStart = 7.dp)),
+                        contentAlignment = Alignment.CenterEnd) {
+                        if (share < 0) Box(Modifier.fillMaxWidth(-share).fillMaxSize().background(MaterialTheme.colorScheme.primary))
+                    }
+                    Box(Modifier.weight(1f).fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(topEnd = 7.dp, bottomEnd = 7.dp)),
+                        contentAlignment = Alignment.CenterStart) {
+                        if (share > 0) Box(Modifier.fillMaxWidth(share).fillMaxSize().background(MaterialTheme.colorScheme.primary))
+                    }
+                }
+                if (s.proportionalWrist) Text("Wrist follows effort is on" + (s.wristEffortPct?.let { ": last effort $it% of your usual" } ?: ""), style = MaterialTheme.typography.bodySmall)
+                TextButton(onClick = vm::resetSimulatedWrist) { Text("Straighten") }
+            }
+        }
     }
 }

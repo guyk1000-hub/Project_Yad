@@ -142,6 +142,8 @@ data class UiState(
     val proportionalWrist: Boolean = false,
     val wristSensitivity: Double = 1.0,
     val wristEffortPct: Int? = null,
+    /** Simulated wrist, in ms of turning: negative = left. Shows what the old hand's wrist would do. */
+    val simWristMs: Int = 0,
 ) {
     val decisionEveryMs: Int get() = if (decisionMode == DecisionMode.FAST) fastHopMs else groupSize * WINDOW_MS
 
@@ -169,6 +171,7 @@ fun displayName(name: String): String = yad.core.ModelNames.display(name)
 const val PI_GROUP_SIZE = 6
 private const val LOG_SIZE = 40
 private const val PREF_HAND = "hand_model"
+const val SIM_WRIST_MS = 3000
 private const val PREF_PRESETS = "hand_presets"
 private const val TIMING_WINDOW = 50
 
@@ -276,6 +279,7 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
             for ((left, units, pct) in wristQueue) {
                 val what = "wrist ${if (left) "left" else "right"} ${units * Haifa3dProtocol.MS_PER_TIME_UNIT} ms (effort $pct%)"
                 if (gate.stopped) { log("classifier", what, "blocked by STOP"); continue }
+                if (!_state.value.realHand) simulateWrist(if (left) -units * Haifa3dProtocol.MS_PER_TIME_UNIT else units * Haifa3dProtocol.MS_PER_TIME_UNIT)
                 onOldHand("classifier", what) { it.execute(ProportionalWrist.step(left, units)) }
             }
         }
@@ -461,6 +465,10 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setProportionalWrist(on: Boolean) = _state.update { it.copy(proportionalWrist = on) }
+
+    /** The simulated wrist stops at ±3 s of turning, like a wrist at the end of its travel. */
+    private fun simulateWrist(deltaMs: Int) = _state.update { it.copy(simWristMs = (it.simWristMs + deltaMs).coerceIn(-SIM_WRIST_MS, SIM_WRIST_MS)) }
+    fun resetSimulatedWrist() = _state.update { it.copy(simWristMs = 0) }
     fun setWristSensitivity(v: Double) = _state.update { it.copy(wristSensitivity = v) }
 
     private fun policyKeyOf(s: UiState): List<Any> =
@@ -989,6 +997,11 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         if (!_state.value.realHand) {
+            when (cmd) {   // the old hand's fixed wrist action turns for 1 s
+                HandCommand.LEFT -> simulateWrist(-1000)
+                HandCommand.RIGHT -> simulateWrist(1000)
+                else -> {}
+            }
             simulatedHand.send(cmd)
             log(source, cmd, "simulated")
             return
