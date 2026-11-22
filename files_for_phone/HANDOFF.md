@@ -85,6 +85,10 @@ the Haifa3D app's functions: live hold-to-move, an action builder, 12 presets on
 (read/edit/save/run), configuration values + resets, battery (driver: `Haifa3dBleHand`; encoding:
 `core/Hand.kt` `Haifa3dProtocol`).
 **The current UI is the ENGINEERING view.** The user plans a separate, easy end-user view later.
+**0.8.0 (`~/ProjectYad-0.8.0.apk`, untested): Fast mode** (Sensitivity → Decision rule: Groups / Fast).
+`core/Decision.kt` `AgreeDecisionPolicy`; overlapping windows via `Windower(hop)`; the guided
+check shows the reaction time. The CNN engine default is 4 threads without XNNPACK.
+**User rules (22 Nov):** keep the CNN; no PC-side verification any more (phone only); hands as they are.
 
 **Rule (from the user, 22 Nov): the private repo and the hand's firmware/config are NOT ours to
 change.** Use the hand as it is; report hardware or firmware limits to its maintainers. So, for

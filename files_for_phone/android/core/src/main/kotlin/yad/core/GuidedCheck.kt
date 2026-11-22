@@ -40,6 +40,9 @@ class GuidedCheck(
     /** Index of the first sample of each phase. */
     private val phaseStart = IntArray(phases.size) { -1 }
 
+    /** Per phase: samples from the phase start to the first right decision (the reaction time). */
+    private val firstRight = HashMap<Int, Int>()
+
     // Per gesture id: windows scored / correct, and what the wrong answers were.
     private val scored = HashMap<Int, Int>()
     private val correct = HashMap<Int, Int>()
@@ -80,6 +83,21 @@ class GuidedCheck(
         else wrong.getOrPut(label) { HashMap() }.merge(predictedClass, 1, Int::plus)
     }
 
+    /**
+     * A decision the pipeline made (what would go to the hand), at the last sample added. Records
+     * how long after the cue the first right decision came, per gesture phase.
+     */
+    fun addDecision(phaseIndex: Int, decidedClass: Int) {
+        val label = phases[phaseIndex].label
+        if (label < 0 || decidedClass != label || phaseIndex in firstRight) return
+        firstRight[phaseIndex] = sampleCount - 1 - phaseStart[phaseIndex]
+    }
+
+    /** Reaction time in ms per gesture phase that got a right decision, in phase order. */
+    fun reactionMs(): List<Pair<Gesture, Int>> = firstRight.keys.sorted().mapNotNull { i ->
+        Gesture.fromId(phases[i].label)?.let { it to firstRight.getValue(i) * 1000 / sampleRate }
+    }
+
     /** One line per gesture: accuracy and the most common wrong answer. */
     fun results(): List<String> = GESTURES.map { g ->
         val n = scored[g.id] ?: 0
@@ -88,6 +106,17 @@ class GuidedCheck(
             "  (else mostly ${Gesture.fromId(cls)?.name ?: cls} ×$k)"
         } ?: ""
         if (n == 0) "${g.name.padEnd(6)} no windows" else "%-6s %3d%%  (%d/%d)%s".format(g.name, 100 * ok / n, ok, n, confusion)
+    } + reactionSummary()
+
+    /** "Reaction: CLOSE 820 ms, OPEN 900 ms, … · median 860 ms" (moving gestures; REST starts the check). */
+    fun reactionSummary(): List<String> {
+        val r = reactionMs().filter { it.first != Gesture.REST }
+        if (r.isEmpty()) return listOf("Reaction: no right decisions yet")
+        val sorted = r.map { it.second }.sorted()
+        val median = if (sorted.size % 2 == 1) sorted[sorted.size / 2] else (sorted[sorted.size / 2 - 1] + sorted[sorted.size / 2]) / 2
+        val missed = GESTURES.count { it != Gesture.REST } - r.size
+        return listOf("Reaction (cue → first right decision): " + r.joinToString(", ") { "${it.first.name} ${it.second} ms" } +
+            " · median $median ms" + if (missed > 0) " · $missed gestures never decided" else "")
     }
 
     /** File: b"YADC", int32 version, int32 header length, header JSON, then samples and windows. */

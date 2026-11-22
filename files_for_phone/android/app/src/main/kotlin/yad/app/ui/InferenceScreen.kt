@@ -49,7 +49,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import yad.app.DecisionMode
 import yad.app.InferenceViewModel
+import yad.app.WINDOW_MS
 import yad.app.PI_GROUP_SIZE
 import yad.app.PI_THRESHOLD
 import yad.app.Source
@@ -332,11 +334,38 @@ private fun Sensitivity(s: UiState, vm: InferenceViewModel) {
         value = s.threshold.toFloat(), onValueChange = { vm.setThreshold((it * 100).roundToInt() / 100.0) },
         valueRange = 0.3f..0.95f, steps = 12,
     )
-    Text("Smoothing: ${s.groupSize} windows (${s.decisionEveryMs} ms per decision)")
-    Slider(
-        value = s.groupSize.toFloat(), onValueChange = { vm.setGroupSize(it.roundToInt()) },
-        valueRange = 1f..12f, steps = 10,
-    )
+    Text("Decision rule", style = MaterialTheme.typography.labelMedium)
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FilterChip(selected = s.decisionMode == DecisionMode.GROUPS, onClick = { vm.setDecisionMode(DecisionMode.GROUPS) }, label = { Text("Groups") })
+        FilterChip(selected = s.decisionMode == DecisionMode.FAST, onClick = { vm.setDecisionMode(DecisionMode.FAST) }, label = { Text("Fast") })
+    }
+    if (s.decisionMode == DecisionMode.GROUPS) {
+        Text("Average ${s.groupSize} windows, one decision per group (${s.decisionEveryMs} ms)")
+        Slider(
+            value = s.groupSize.toFloat(), onValueChange = { vm.setGroupSize(it.roundToInt()) },
+            valueRange = 1f..12f, steps = 10,
+        )
+    } else {
+        Text("Decide after every window, when the last ${s.fastWindows} agree (each ≥ the threshold)")
+        Slider(
+            value = s.fastWindows.toFloat(), onValueChange = { vm.setFastWindows(it.roundToInt()) },
+            valueRange = 1f..8f, steps = 6,
+        )
+        Text("New window every", style = MaterialTheme.typography.labelMedium)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(200, 100).forEach { ms ->
+                FilterChip(selected = s.fastHopMs == ms, onClick = { vm.setFastHop(ms) },
+                    label = { Text(if (ms == 200) "200 ms" else "100 ms (overlapping)") })
+            }
+        }
+        if (s.fastHopMs < WINDOW_MS && s.source == Source.REPLAY) Text("Recordings replay at 200 ms; the 100 ms setting applies to the armband.", style = MaterialTheme.typography.bodySmall)
+        if (s.fastHopMs < WINDOW_MS && s.lagMs > 300) Text("⚠ The phone can't keep up at 100 ms (${s.lagMs} ms behind): use 200 ms.", color = WarnAmber)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Switch(checked = s.switchGuard, onCheckedChange = vm::setSwitchGuard)
+            Text("Switch guard: one window more to go straight between two moving gestures")
+        }
+        Text("Fast mode sends a command only when the decision changes.", style = MaterialTheme.typography.bodySmall)
+    }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Switch(checked = s.sendOnlyOnChange, onCheckedChange = vm::setSendOnlyOnChange)
         Text("send only when the gesture changes")

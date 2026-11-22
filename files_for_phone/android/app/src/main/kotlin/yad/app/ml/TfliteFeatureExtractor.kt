@@ -21,13 +21,14 @@ data class Engine(
     val gpu: Boolean = false,
 ) {
     companion object {
-        val DEFAULT = Engine("CPU, 1 thread", threads = 1)
+        /** Fastest on the S23 FE (benchmark 14 Nov: 94.9 ms vs 111.5 ms for 1 thread), same fp32 results. */
+        val DEFAULT = Engine("CPU, 4 threads, no XNNPACK", threads = 4, xnnpack = false)
 
         val BENCHMARK = listOf(
-            DEFAULT,
+            Engine("CPU, 1 thread", threads = 1),
             Engine("CPU, 2 threads", threads = 2),
             Engine("CPU, 4 threads", threads = 4),
-            Engine("CPU, 4 threads, no XNNPACK", threads = 4, xnnpack = false),
+            DEFAULT,
             Engine("CPU, 1 thread, fp16 allowed", threads = 1, allowFp16 = true),
             Engine("CPU, 4 threads, fp16 allowed", threads = 4, allowFp16 = true),
             Engine("GPU, fp32", gpu = true),

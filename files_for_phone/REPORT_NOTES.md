@@ -293,6 +293,29 @@ with `dexdump`: no source in the repo) offers, as far as the hand's code runs it
 The old encoder is now general (`Haifa3dProtocol.action`), and the Pi's four commands still come
 out byte for byte the same (unit test, plus the golden test against `protocol.py`).
 
+### M6: Fast mode, lower latency with the same model (0.8.0, 22 Nov)
+
+The user's constraints: keep the CNN (the project's concept), leave the hands as they are, and
+verify on the phone only. So the latency work is in the decision rule:
+- **Groups** (as before): average N windows, one decision per group (N × 200 ms).
+- **Fast:** decide after every window, as soon as the last N windows agree (same top class, each
+  ≥ the threshold). It doesn't wait for a group boundary, so a change is acted on up to
+  (group − 1) × 200 ms sooner. Optional 100 ms overlapping windows (the CNN takes ~95 ms).
+  A switch guard asks for one window more when going straight between two moving gestures
+  (the "OPEN flashing on the way to CLOSE" case). Commands are sent only on change.
+- CNN engine default changed to 4 threads without XNNPACK (94.9 vs 111.5 ms per window on the S23
+  FE, same fp32 results, checked by the on-device self-test).
+- The guided check now measures the **reaction time** (cue → first right decision) per gesture,
+  so Groups vs Fast is compared on the phone.
+
+Results: to be measured on the phone (table to fill: mode, N, hop, accuracy, median reaction).
+
+| Mode | Windows | Hop | Accuracy | Median reaction |
+|---|---|---|---|---|
+| Groups | 4 | 200 ms | | |
+| Fast | 3 | 200 ms | | |
+| Fast | 3 | 100 ms | | |
+
 ## Decisions log
 
 | Date | Decision | Why |
@@ -311,6 +334,7 @@ out byte for byte the same (unit test, plus the golden test against `protocol.py
 | 2026-11-22 | The new hand and its code are used as they are (not ours to change) | The user: not up to them |
 | 2026-11-22 | The app supports both hands, switched by hand; each offers only what it supports | The new hand isn't complete; the project must still finish |
 | 2026-11-22 | Today's screens are the engineering view; an easy end-user view comes later | The user's plan |
+| 2026-11-22 | Keep the CNN; latency via the decision rule (Fast mode); verify on the phone only | The user: the CNN is the concept; no more PC checks |
 | 2026-11-15 | Train on the phone (own L-BFGS), not on the PC | No PC round trip each session; matches sklearn offline |
 
 ## Ethics notes (to expand)

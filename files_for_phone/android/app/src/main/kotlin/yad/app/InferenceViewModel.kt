@@ -35,6 +35,7 @@ import yad.core.TrainingSet
 import yad.core.GuidedCheck
 import yad.core.Gesture
 import yad.core.GroupAverageDecisionPolicy
+import yad.core.AgreeDecisionPolicy
 import yad.core.GroupScorer
 import yad.core.HandCommand
 import yad.core.HandModel
@@ -53,6 +54,9 @@ import java.util.concurrent.Executors
 
 enum class Source { REPLAY, ARMBAND }
 
+/** GROUPS: the Pi's rule (average N windows, one decision per group). FAST: decide after every window (AgreeDecisionPolicy). */
+enum class DecisionMode { GROUPS, FAST }
+
 data class RecordingInfo(val fileName: String, val seconds: Int)
 
 data class LogEntry(val time: String, val source: String, val what: String, val outcome: String)
@@ -67,6 +71,10 @@ data class UiState(
     val stopped: Boolean = false,
     val threshold: Double = PI_THRESHOLD,
     val groupSize: Int = PI_GROUP_SIZE,
+    val decisionMode: DecisionMode = DecisionMode.GROUPS,
+    val fastWindows: Int = 3,
+    val fastHopMs: Int = WINDOW_MS,
+    val switchGuard: Boolean = true,
     val sendOnlyOnChange: Boolean = false,
     val decided: Gesture? = null,
     val confidence: Double = 0.0,
@@ -115,7 +123,7 @@ data class UiState(
     val recordings: List<RecordingInfo> = emptyList(),
     val newModelLabel: String = "",
 ) {
-    val decisionEveryMs: Int get() = groupSize * WINDOW_MS
+    val decisionEveryMs: Int get() = if (decisionMode == DecisionMode.FAST) fastHopMs else groupSize * WINDOW_MS
 
     /** Live signal level vs the user's recorded rest level: the units check for hardware session A. */
     val levelVerdict: String?
@@ -177,10 +185,13 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
     private var head: MlpHead? = null
     private var replay: ReplayRecording? = null
     private var policy: DecisionPolicy = GroupAverageDecisionPolicy(PI_GROUP_SIZE, PI_THRESHOLD)
-    private var policyKey = PI_GROUP_SIZE to PI_THRESHOLD
+    private var policyKey: List<Any> = emptyList()
     private var scorer = GroupScorer(PI_GROUP_SIZE)
+
+    /** Worker thread: the class id decided by the last window, if any (for the guided check's reaction time). */
+    private var lastDecision: Int? = null
     private val filters = FilterChain.pi()
-    private val windower = Windower()
+    private var windower = Windower()
     private val levels = ChannelLevels()
     private var cursor = 0
     private val cnnTimes = ArrayDeque<Double>()
@@ -307,11 +318,12 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
     private fun resetSignalPath() {
         cursor = 0
         filters.reset()
-        windower.reset()
+        // Fast mode can cut live windows more often than one per 200 ms (they then overlap).
+        val s0 = _state.value
+        val hop = if (s0.decisionMode == DecisionMode.FAST && s0.source == Source.ARMBAND) s0.fastHopMs * SAMPLE_RATE / 1000 else 100
+        windower = Windower(hop = hop)
         levels.clear()
-        policy = GroupAverageDecisionPolicy(_state.value.groupSize, _state.value.threshold)
-        policyKey = _state.value.groupSize to _state.value.threshold
-        scorer = GroupScorer(policyKey.first)
+        rebuildPolicy(_state.value)
         cnnTimes.clear(); headTimes.clear()
         _state.update {
             it.copy(
@@ -370,10 +382,28 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
             if (c != null && phase != null && probs != null) {
                 val h = head!!
                 c.addWindow(phase, h.classes[probs.indices.maxBy { probs[it] }], probs, window.length)
+                lastDecision?.let { c.addDecision(phase, it) }
             }
             _state.update { it.copy(lagMs = backlog * 1000 / SAMPLE_RATE, liveLevels = levels.mean()) }
             if (c != null) updateCheck(c)
         }
+    }
+
+    private fun policyKeyOf(s: UiState): List<Any> =
+        listOf(s.decisionMode, s.groupSize, s.threshold, s.fastWindows, s.switchGuard, head?.classes?.toList() ?: emptyList<Int>())
+
+    /** Worker thread. */
+    private fun rebuildPolicy(s: UiState) {
+        policy = when (s.decisionMode) {
+            DecisionMode.GROUPS -> GroupAverageDecisionPolicy(s.groupSize, s.threshold)
+            DecisionMode.FAST -> AgreeDecisionPolicy(
+                s.fastWindows, s.threshold, s.switchGuard,
+                restIndex = head?.classes?.indexOf(Gesture.REST.id)?.takeIf { it >= 0 },
+            )
+        }
+        policyKey = policyKeyOf(s)
+        scorer = GroupScorer(if (s.decisionMode == DecisionMode.FAST) 1 else s.groupSize)
+        lastDecision = null
     }
 
     /** Worker thread: one filtered window through CNN, head, policy; then score and maybe command the hand. */
@@ -381,12 +411,9 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
         val h = head ?: return null
         val fx = extractor ?: return null
         val s = _state.value
-        if ((s.groupSize to s.threshold) != policyKey) {
-            policy = GroupAverageDecisionPolicy(s.groupSize, s.threshold)
-            policyKey = s.groupSize to s.threshold
-            scorer = GroupScorer(s.groupSize)
-        }
-        gate.sendOnlyOnChange = s.sendOnlyOnChange
+        if (policyKeyOf(s) != policyKey) rebuildPolicy(s)
+        // Fast mode decides every window: repeating the same command each time would flood the hand.
+        gate.sendOnlyOnChange = s.sendOnlyOnChange || s.decisionMode == DecisionMode.FAST
 
         val t0 = System.nanoTime()
         val cnn = fx.extract(window)
@@ -399,6 +426,7 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
         val windowGesture = Gesture.fromId(h.classes[probs.indices.maxBy { probs[it] }])
         val decision = policy.offer(probs)
         val decidedGesture = decision?.let { Gesture.fromId(h.classes[it.classIndex]) }
+        lastDecision = decision?.let { h.classes[it.classIndex] }
         if (label != null) scorer.add(label.id, decidedGesture?.id)
         if (decidedGesture != null) {
             val cmd = gate.fromClassifier(decidedGesture)
@@ -866,9 +894,22 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setThreshold(v: Double) = _state.update { it.copy(threshold = v) }
     fun setGroupSize(n: Int) = _state.update { it.copy(groupSize = n) }
+
+    fun setDecisionMode(m: DecisionMode) = restartLiveAfter { it.copy(decisionMode = m) }
+    fun setFastWindows(n: Int) = _state.update { it.copy(fastWindows = n) }
+    fun setSwitchGuard(on: Boolean) = _state.update { it.copy(switchGuard = on) }
+    fun setFastHop(ms: Int) = restartLiveAfter { it.copy(fastHopMs = ms) }
+
+    /** Changes that alter how live windows are cut need a fresh start of the armband run. */
+    private fun restartLiveAfter(change: (UiState) -> UiState) {
+        val wasLive = _state.value.running && _state.value.source == Source.ARMBAND
+        if (wasLive) stopRun()
+        _state.update(change)
+        if (wasLive) start() else viewModelScope.launch(worker) { resetSignalPath() }
+    }
     fun setSendOnlyOnChange(on: Boolean) = _state.update { it.copy(sendOnlyOnChange = on) }
     fun setRealTime(on: Boolean) = _state.update { it.copy(realTime = on) }
-    fun piPreset() = _state.update { it.copy(threshold = PI_THRESHOLD, groupSize = PI_GROUP_SIZE, sendOnlyOnChange = false) }
+    fun piPreset() = restartLiveAfter { it.copy(threshold = PI_THRESHOLD, groupSize = PI_GROUP_SIZE, sendOnlyOnChange = false, decisionMode = DecisionMode.GROUPS) }
 
     // ---- benchmark -----------------------------------------------------------------------
 
