@@ -179,6 +179,7 @@ private enum class StepState { TODO, BUSY, DONE }
 @Composable
 private fun HomeTab(s: UiState, vm: InferenceViewModel, onChangePerson: () -> Unit, onTrain: () -> Unit, onHand: () -> Unit) {
     val name = s.person!!.replaceFirstChar { it.uppercase() }
+    var choosingModel by remember { mutableStateOf(false) }
     Row(verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text("Hi, $name", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
@@ -208,9 +209,15 @@ private fun HomeTab(s: UiState, vm: InferenceViewModel, onChangePerson: () -> Un
         if (s.model != null) "Model ready (${yad.app.displayName(s.model)}). Just put the armband on? A 1-minute calibration makes it more accurate."
         else "The phone doesn't know your gestures yet. Record them once: about 3 minutes.",
     ) {
-        if (s.model != null) OutlinedButton(onClick = onTrain) { Text("Calibrate (1 min)") }
-        else Button(onClick = onTrain) { Text("Record my gestures") }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (s.model != null) OutlinedButton(onClick = onTrain) { Text("Calibrate (1 min)") }
+            else Button(onClick = onTrain) { Text("Record my gestures") }
+            if (personModels(s).isNotEmpty()) {
+                OutlinedButton(onClick = { choosingModel = true }) { Text("Models (${personModels(s).size})") }
+            }
+        }
     }
+    if (choosingModel) ModelChooser(s, vm, onDone = { choosingModel = false })
 
     val handReady = s.realHand && s.handState == "connected"
     Step(
@@ -318,6 +325,12 @@ private fun TrainTab(s: UiState, vm: InferenceViewModel, onHome: () -> Unit) {
     }
 
     TrainingProgress(s)
+
+    OutlinedTextField(
+        value = s.newModelLabel, onValueChange = vm::setNewModelLabel, singleLine = true, modifier = Modifier.fillMaxWidth(),
+        label = { Text("Name for the new model (optional)") },
+        supportingText = { Text("e.g. \"morning\" or \"left arm\". Recording or calibrating saves a new model with this name; your other models stay.") },
+    )
 
     if (s.model != null) ActionCard(
         "Quick calibration", "1 minute",
@@ -472,4 +485,52 @@ private fun SettingsTab(s: UiState, vm: InferenceViewModel) {
 fun AppRoot(vm: InferenceViewModel) {
     val s by vm.state.collectAsStateWithLifecycle()
     if (s.engineering) InferenceScreen(vm) else UserApp(s, vm)
+}
+
+/** [s.person]'s models, newest first (phone-made ones carry their date). */
+private fun personModels(s: UiState): List<String> =
+    s.models.filter { yad.core.ModelNames.userOf(it) == s.person }.sortedByDescending { it.substringAfter('@', "") }
+
+/** Pick which of the person's models to use; phone-made ones can be deleted. */
+@Composable
+private fun ModelChooser(s: UiState, vm: InferenceViewModel, onDone: () -> Unit) {
+    var deleting by remember { mutableStateOf<String?>(null) }
+    AlertDialog(
+        onDismissRequest = onDone,
+        title = { Text("${s.person?.replaceFirstChar { it.uppercase() }}'s models") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                personModels(s).forEach { m ->
+                    Card(
+                        Modifier.fillMaxWidth().clickable { vm.selectModel(m); onDone() },
+                        colors = CardDefaults.cardColors(containerColor = if (m == s.model) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant),
+                    ) {
+                        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(yad.app.displayName(m), fontWeight = FontWeight.Bold)
+                                Text(
+                                    when {
+                                        m == s.model -> "in use"
+                                        '@' !in m -> "original model (from the PC recording)"
+                                        else -> "made on this phone"
+                                    }, style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+                            if ('@' in m) TextButton(onClick = { deleting = m }) { Text("Delete", color = Danger) }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDone) { Text("Close") } },
+    )
+    deleting?.let { m ->
+        AlertDialog(
+            onDismissRequest = { deleting = null },
+            title = { Text("Delete ${yad.app.displayName(m)}?") },
+            text = { Text("The recordings stay, so you can train again any time.") },
+            confirmButton = { TextButton(onClick = { vm.deleteModel(m); deleting = null }) { Text("Delete", color = Danger) } },
+            dismissButton = { TextButton(onClick = { deleting = null }) { Text("Cancel") } },
+        )
+    }
 }
