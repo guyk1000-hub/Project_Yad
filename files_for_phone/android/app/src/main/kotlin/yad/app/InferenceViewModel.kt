@@ -40,6 +40,7 @@ import yad.core.GroupScorer
 import yad.core.HandCommand
 import yad.core.HandModel
 import yad.core.GestureSet
+import yad.core.ProportionalWrist
 import yad.core.Haifa3dProtocol
 import yad.core.HandPreset
 import yad.core.HandPresets
@@ -124,6 +125,9 @@ data class UiState(
     val recordings: List<RecordingInfo> = emptyList(),
     val newModelLabel: String = "",
     val recordGestures: GestureSet = GestureSet.BASIC,
+    val proportionalWrist: Boolean = false,
+    val wristSensitivity: Double = 1.0,
+    val wristEffortPct: Int? = null,
 ) {
     val decisionEveryMs: Int get() = if (decisionMode == DecisionMode.FAST) fastHopMs else groupSize * WINDOW_MS
 
@@ -179,6 +183,13 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Classifier commands, newest kept if the hand falls behind. */
     private val handQueue = Channel<HandCommand>(capacity = 4, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+
+    /** Proportional wrist steps (old hand), newest kept: (left, 50 ms units, effort in % of typical). */
+    private val wristQueue = Channel<Triple<Boolean, Int, Int>>(capacity = 2, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+
+    /** Worker thread: effort tracking for the proportional wrist; rebuilt when the model changes. */
+    private var wrist: ProportionalWrist? = null
+    private val recentEffort = ArrayDeque<Double>()
 
     // Owned by the worker thread.
     private var modelBuffer: MappedByteBuffer? = null
@@ -247,6 +258,13 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
                 if (gate.stopped) log("classifier", cmd, "blocked by STOP") else deliver(cmd, "classifier")
             }
         }
+        viewModelScope.launch(Dispatchers.Default) {
+            for ((left, units, pct) in wristQueue) {
+                val what = "wrist ${if (left) "left" else "right"} ${units * Haifa3dProtocol.MS_PER_TIME_UNIT} ms (effort $pct%)"
+                if (gate.stopped) { log("classifier", what, "blocked by STOP"); continue }
+                onOldHand("classifier", what) { it.execute(ProportionalWrist.step(left, units)) }
+            }
+        }
     }
 
     // ---- model & source ------------------------------------------------------------------
@@ -261,6 +279,7 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
         val r = catalog.replay(name)
         head = h
         replay = r
+        wrist = null                      // the effort reference belongs to the user and features of this model
         resetSignalPath()
         refreshRecordings(catalog.userOf(name))
         _state.update {
@@ -391,6 +410,21 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Worker thread: the user's typical LEFT/RIGHT magnitude from their cached recording features. */
+    private fun effortReference(): Double? {
+        val h = head ?: return null
+        val user = catalog.userOf(_state.value.model ?: return null)
+        val sets = catalog.recordings(user).mapNotNull { f ->
+            val cache = java.io.File(f.path.removeSuffix(".bin") + ".feat")
+            if (!cache.exists()) return@mapNotNull null
+            runCatching { TrainingSet.parse(cache.readBytes()) }.getOrNull()?.takeIf { it.second == h.rmsOver }?.first
+        }
+        return ProportionalWrist.reference(sets)
+    }
+
+    fun setProportionalWrist(on: Boolean) = _state.update { it.copy(proportionalWrist = on) }
+    fun setWristSensitivity(v: Double) = _state.update { it.copy(wristSensitivity = v) }
+
     private fun policyKeyOf(s: UiState): List<Any> =
         listOf(s.decisionMode, s.groupSize, s.threshold, s.fastWindows, s.switchGuard, head?.classes?.toList() ?: emptyList<Int>())
 
@@ -420,7 +454,10 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
         val t0 = System.nanoTime()
         val cnn = fx.extract(window)
         val t1 = System.nanoTime()
-        val probs = h.predictProba(ScalarFeatures.headInput(cnn, window, h.rmsOver))
+        val input = ScalarFeatures.headInput(cnn, window, h.rmsOver)
+        val probs = h.predictProba(input)
+        recentEffort.addLast(input.last().toDouble())          // "mag": how strongly the muscles fire
+        if (recentEffort.size > 3) recentEffort.removeFirst()
         val t2 = System.nanoTime()
         cnnTimes.addTiming((t1 - t0) / 1e6)
         headTimes.addTiming((t2 - t1) / 1e6)
@@ -430,7 +467,18 @@ class InferenceViewModel(app: Application) : AndroidViewModel(app) {
         val decidedGesture = decision?.let { Gesture.fromId(h.classes[it.classIndex]) }
         lastDecision = decision?.let { h.classes[it.classIndex] }
         if (label != null) scorer.add(label.id, decidedGesture?.id)
-        if (decidedGesture != null) {
+        val proportional = s.proportionalWrist && s.handModel == HandModel.HAIFA3D_V1 &&
+            (decidedGesture == Gesture.LEFT || decidedGesture == Gesture.RIGHT)
+        if (proportional) {
+            // Every decision is a step (not only changes): the wrist keeps turning while the gesture holds.
+            val w = wrist ?: ProportionalWrist(effortReference()).also { wrist = it }
+            val ratio = w.ratio(recentEffort.average())
+            val units = w.timeUnits(ratio, s.decisionEveryMs, s.wristSensitivity)
+            val pct = (ratio * 100).toInt()
+            _state.update { it.copy(wristEffortPct = pct) }
+            if (gate.stopped) log("classifier", "wrist", "blocked by STOP")
+            else wristQueue.trySend(Triple(decidedGesture == Gesture.LEFT, units, pct))
+        } else if (decidedGesture != null) {
             val cmd = gate.fromClassifier(decidedGesture)
             when {
                 cmd != null -> handQueue.trySend(cmd)

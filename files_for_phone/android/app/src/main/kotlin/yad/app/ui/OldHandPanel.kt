@@ -88,6 +88,20 @@ fun OldHandPanel(s: UiState, vm: InferenceViewModel) {
                 }
             }
 
+            PanelSection("Wrist follows effort") {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Switch(checked = s.proportionalWrist, onCheckedChange = vm::setProportionalWrist)
+                    Text(if (s.proportionalWrist) "On: a LEFT/RIGHT gesture turns the wrist while you hold it — the harder, the faster"
+                        else "Off: each LEFT/RIGHT turns the wrist one fixed step", style = MaterialTheme.typography.bodySmall)
+                }
+                if (s.proportionalWrist) {
+                    Text("Sensitivity ×${"%.1f".format(s.wristSensitivity)}" + (s.wristEffortPct?.let { "   ·   last effort: $it% of your usual" } ?: ""))
+                    Slider(value = s.wristSensitivity.toFloat(), onValueChange = { vm.setWristSensitivity((it * 10).roundToInt() / 10.0) },
+                        valueRange = 0.5f..2f, steps = 14)
+                    Text("Works best with the Fast decision rule (a step after every window).", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+
             PanelSection("Live control — hold to move") {
                 HoldRow("Wrist", "◀ Left", "Right ▶", Motor.TURN, vm)
                 listOf(Motor.FINGER1, Motor.FINGER2, Motor.FINGER3, Motor.FINGER4).forEach { HoldRow(it.title, "Open", "Close", it, vm) }
